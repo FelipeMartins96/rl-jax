@@ -30,7 +30,7 @@ class DDPGActor(nn.Module):
         x = obs
         x = nn.relu(hidden_layer1(x))
         x = nn.relu(hidden_layer2(x))
-        x = final_layer(x)
+        x = nn.tanh(final_layer(x))
 
         return x
 
@@ -48,7 +48,7 @@ class DDPGCritic(nn.Module):
         hidden_layer2 = nn.Dense(
             300,
             kernel_init=lecun_uniform(),
-            bias_init=bias_init_fn(fan_in=300 + act.shape[-1]),
+            bias_init=bias_init_fn(fan_in=400 + act.shape[-1]),
         )
         final_layer = nn.Dense(
             1, kernel_init=uniform(scale=3e-4), bias_init=uniform(scale=3e-4)
