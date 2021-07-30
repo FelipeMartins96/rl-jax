@@ -1,7 +1,8 @@
+from typing import Dict, Tuple, Union
 import gym
 import jax
-from jax.interpreters.xla import Backend
 import jax.numpy as jnp
+import numpy as np
 import optax
 from flax.training.train_state import TrainState
 from rl_jax.agents.base import Action, Agent
@@ -11,6 +12,14 @@ from rl_jax.replay.simple_replay import ReplayBuffer
 
 
 class DDPG(Agent):
+    """Deep Deterministic Policy Gradient (DDPG) Agent
+
+    tries to replicate the paper experimental details.
+    Continuous control with deep reinforcement learning, 
+    Lillicrap et al., 2016.
+    (https://arxiv.org/abs/1509.02971)
+    """
+
     def __init__(
         self,
         env: gym.Env,
@@ -48,49 +57,20 @@ class DDPG(Agent):
         self._ou_state = jnp.zeros(env.action_space.shape)
 
         # Neural Networks
-        actor_model = DDPGActor(action_dim=env.action_space.shape[0])
-        actor_forward = jax.jit(actor_model.apply)
-        actor_params = actor_model.init(actor_key, obs_sample)
-        actor_tx = optax.adam(actor_lr)
-        actor_opt_state = actor_tx.init(actor_params)
-
-        critic_model = DDPGCritic()
-        critic_forward = jax.jit(critic_model.apply)
-        critic_tx = optax.adamw(critic_lr, weight_decay=critic_weight_decay)
-        critic_params = critic_model.init(critic_key, obs_sample, act_sample)
-        critic_opt_state = critic_tx.init(critic_params)
-
-        # Train State
-        self._actor = TrainState(
-            step=0,
-            apply_fn=actor_forward,
-            params=actor_params,
-            tx=actor_tx,
-            opt_state=actor_opt_state,
-        )
-        self._actor_tgt = TrainState(
-            step=0,
-            apply_fn=actor_forward,
-            params=actor_params,
-            tx=None,
-            opt_state=None,
-        )
-        self._critic = TrainState(
-            step=0,
-            apply_fn=critic_forward,
-            params=critic_params,
-            tx=critic_tx,
-            opt_state=critic_opt_state,
-        )
-        self._critic_tgt = TrainState(
-            step=0,
-            apply_fn=critic_forward,
-            params=critic_params,
-            tx=None,
-            opt_state=None,
+        self._actor, self._critic, self._actor_tgt, self._critic_tgt = DDPG._init_nns(
+            action_dim=env.action_space.shape[0],
+            obs_sample=obs_sample,
+            act_sample=act_sample,
+            actor_lr=actor_lr,
+            critic_lr=critic_lr,
+            critic_weight_decay=critic_weight_decay,
+            actor_key=actor_key,
+            critic_key=critic_key,
         )
 
-    def update(self):
+    def update(self) -> Union[Dict, None]:
+        """Update the agent."""
+
         if self._replay.size < self._min_replay_size:
             return None
 
@@ -110,6 +90,8 @@ class DDPG(Agent):
         return info
 
     def select_action(self, observation: jnp.ndarray, add_noise: bool = True) -> Action:
+        """Select an action."""
+
         if add_noise:
             self._ou_key, key = jax.random.split(self._ou_key)
             action, self._ou_state = DDPG._select_action(
@@ -124,7 +106,17 @@ class DDPG(Agent):
             action = self._actor.apply_fn(self._actor.params, observation)
         return action.copy()
 
-    def observe(self, state, action, reward, done, next_state, info):
+    def observe(
+        self,
+        state: np.ndarray,
+        action: np.ndarray,
+        reward: float,
+        done: bool,
+        next_state: np.ndarray,
+        info: Dict,
+    ) -> None:
+        """Add a transition to the replay buffer."""
+
         if not done or "TimeLimit.truncated" in info:
             discount = self._gamma
         else:
@@ -140,6 +132,52 @@ class DDPG(Agent):
             )
         )
 
+    @staticmethod
+    def _init_nns(
+        action_dim: int,
+        obs_sample: np.ndarray,
+        act_sample: np.ndarray,
+        actor_lr: float,
+        critic_lr: float,
+        critic_weight_decay: float,
+        actor_key: jnp.ndarray,
+        critic_key: jnp.ndarray,
+    ) -> Tuple[TrainState, TrainState, TrainState, TrainState]:
+        """Initialize Neural Networks"""
+
+        actor_model = DDPGActor(action_dim=action_dim)
+        actor_forward = jax.jit(actor_model.apply)
+        actor_params = actor_model.init(actor_key, obs_sample)
+        actor_tx = optax.adam(actor_lr)
+        actor_opt_state = actor_tx.init(actor_params)
+
+        critic_model = DDPGCritic()
+        critic_forward = jax.jit(critic_model.apply)
+        critic_tx = optax.adamw(critic_lr, weight_decay=critic_weight_decay)
+        critic_params = critic_model.init(critic_key, obs_sample, act_sample)
+        critic_opt_state = critic_tx.init(critic_params)
+
+        # Train State
+        actor = TrainState(
+            step=0,
+            apply_fn=actor_forward,
+            params=actor_params,
+            tx=actor_tx,
+            opt_state=actor_opt_state,
+        )
+        critic = TrainState(
+            step=0,
+            apply_fn=critic_forward,
+            params=critic_params,
+            tx=critic_tx,
+            opt_state=critic_opt_state,
+        )
+
+        actor_tgt = TrainState(0, actor_forward, actor_params, None, None)
+        critic_tgt = TrainState(0, critic_forward, critic_params, None, None)
+
+        return (actor, critic, actor_tgt, critic_tgt)
+
     @jax.jit
     def _update(
         actor: TrainState,
@@ -147,7 +185,9 @@ class DDPG(Agent):
         actor_tgt: TrainState,
         critic_tgt: TrainState,
         batch: Batch,
-    ):
+    ) -> Tuple[Tuple[TrainState, TrainState], Dict[str, jnp.ndarray]]:
+        """Update Actor and Critic Neural Networks"""
+
         # Set target values
         acts_tp1 = actor_tgt.apply_fn(actor_tgt.params, batch.next_states)
         qs_tp1 = critic_tgt.apply_fn(critic_tgt.params, batch.next_states, acts_tp1)
@@ -190,7 +230,9 @@ class DDPG(Agent):
         state: TrainState,
         tgt_state: TrainState,
         tau: float,
-    ):
+    ) -> TrainState:
+        """Soft target network update."""
+
         new_target_params = jax.tree_multimap(
             lambda p, tp: p * tau + tp * (1 - tau), state.params, tgt_state.params
         )
@@ -198,9 +240,18 @@ class DDPG(Agent):
         return tgt_state.replace(params=new_target_params)
 
     @jax.partial(jax.jit, static_argnums=(4, 5))
-    def _select_action(actor, observation, key, ou_state, sigma, theta):
+    def _select_action(
+        actor: TrainState,
+        observation: np.ndarray,
+        key: jnp.ndarray,
+        ou_state: jnp.ndarray,
+        sigma: float,
+        theta: float,
+    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        """Select action using actor network with added Ornstein-Uhlenbeck noise."""
+
         action = actor.apply_fn(actor.params, observation)
-        ou_state = (1.0 - theta) * ou_state + jax.random.normal(
+        ou_state = (jnp.array(1.0) - theta) * ou_state + jax.random.normal(
             key, shape=action.shape
         ) * sigma
         return jnp.clip(action + ou_state, -1, 1), ou_state
