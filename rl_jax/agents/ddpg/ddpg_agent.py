@@ -15,7 +15,7 @@ class DDPG(Agent):
     """Deep Deterministic Policy Gradient (DDPG) Agent
 
     tries to replicate the paper experimental details.
-    Continuous control with deep reinforcement learning, 
+    Continuous control with deep reinforcement learning,
     Lillicrap et al., 2016.
     (https://arxiv.org/abs/1509.02971)
     """

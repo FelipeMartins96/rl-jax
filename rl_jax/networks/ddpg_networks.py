@@ -24,7 +24,9 @@ class DDPGActor(nn.Module):
             300, kernel_init=lecun_uniform(), bias_init=bias_init_fn(fan_in=400)
         )
         final_layer = nn.Dense(
-            self.action_dim, kernel_init=uniform(scale=3e-3), bias_init=uniform(scale=3e-3)
+            self.action_dim,
+            kernel_init=uniform(scale=3e-3),
+            bias_init=uniform(scale=3e-3),
         )
 
         x = obs
