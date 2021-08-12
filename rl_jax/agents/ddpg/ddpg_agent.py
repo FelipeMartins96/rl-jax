@@ -6,7 +6,7 @@ import numpy as np
 import optax
 from flax.training.train_state import TrainState
 from rl_jax.agents.base import Action, Agent
-from rl_jax.networks.ddpg import DDPGActor, DDPGCritic
+from rl_jax.networks.ddpg_networks import DDPGActor, DDPGCritic
 from rl_jax.replay import Batch, Transition
 from rl_jax.replay.simple_replay import ReplayBuffer
 
