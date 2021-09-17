@@ -27,7 +27,7 @@ def build_ppo_loss(policy_model, value_model, epsilon, c1, c2):
 
         loss = -l_clip + c1 * l_vf - c2 * S
 
-        info = dict(l_clip=l_clip, l_vf=l_vf, S=S)
+        info = dict(l_clip=l_clip, l_vf=l_vf, S=S, loss=loss)
 
         return loss.squeeze(), info
 
@@ -90,15 +90,16 @@ def optim_update_fcn(optim):
 import wandb
 
 if __name__ == "__main__":
-    env = gym.wrappers.Monitor(gym.make("Pendulum-v0"), "./monitor/", force=True)
-    # env = gym.make("Pendulum-v0")
+    env = gym.wrappers.RecordVideo(gym.make("LunarLanderContinuous-v2"), "./monitor/")
+    # env = gym.make("LunarLanderContinuous-v2")
     # wandb.init(project="cleanrl.benchmark", entity="felipemartins", mode="disabled")
     wandb.init(project="cleanrl.benchmark", entity="felipemartins", monitor_gym=True)
     rng = jax.random.PRNGKey(0)
     epsilon = 0.1
     c1 = 0.25
     c2 = 0.01
-    gamma = 0.95
+    gamma = 0.99
+    update_epochs = 3
 
     p_model = Policy(env.action_space.shape[0])
     v_model = Value()
@@ -140,8 +141,8 @@ if __name__ == "__main__":
             rng, a_key = jax.random.split(rng, 2)
             a, logprob = sample_action(a_key, p_params, s)
             # Scaling to environment, assumes env action_space is simmetric around 0
-            clipped_a = jnp.clip(a*env.action_space.high, env.action_space.low, env.action_space.high)
-            s_, r, done, _ = env.step(clipped_a)
+            clipped_a = np.clip(a*env.action_space.high, env.action_space.low, env.action_space.high)
+            s_, r, done, _ = env.step(np.array(clipped_a))
             v = get_v(v_params, s)
             s_v.append(s)
             a_v.append(a)
@@ -165,13 +166,13 @@ if __name__ == "__main__":
             jnp.array(advantages),
         )
 
-        # for i in range(10):
-        (p_grad, v_grad), info = ppo_loss_grad_vmap(
-            p_params, v_params, s_j, a_j, lp_j, r_j, adv_j
-        )
+        for i in range(update_epochs):
+            (p_grad, v_grad), info = ppo_loss_grad_vmap(
+                p_params, v_params, s_j, a_j, lp_j, r_j, adv_j
+            )
 
-        p_params, p_opt_state = p_update_step(p_params, p_grad, p_opt_state)
-        v_params, v_opt_state = v_update_step(v_params, v_grad, v_opt_state)
+            p_params, p_opt_state = p_update_step(p_params, p_grad, p_opt_state)
+            v_params, v_opt_state = v_update_step(v_params, v_grad, v_opt_state)
 
         et = time.time()
         info_mean = jax.tree_map(lambda x: x.mean(axis=0), info)
@@ -182,13 +183,9 @@ if __name__ == "__main__":
                 steps_s=steps / (et - st),
                 mean_return=sum(returns) / steps,
                 mean_adv=adv_j.mean(),
-                logstd_param=p_params['params']['logstd'],
+                logstd_param0=p_params['params']['logstd'][0],
+                logstd_param1=p_params['params']['logstd'][1],
             )
         )
         wandb.log(info_mean)
-        # infos = [f"{k} = {v} " for k, v in info_mean.items()]
-        # print(
-        #     f"ep {ep}, rw = {sum(r_v)}, mean_v = {sum(v_v)/steps}, steps/s = {steps/(et-st)} mean_return = {sum(returns)/steps}",
-        #     "".join(infos),
-        # )
         st = et
