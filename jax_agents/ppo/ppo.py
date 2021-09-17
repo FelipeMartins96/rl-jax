@@ -1,8 +1,15 @@
-import jax.numpy as jnp
-import distrax
-import numpy as np
+import time
 
+import distrax
+import flax.linen as nn
+import gym
+import jax
+import jax.numpy as jnp
+import numpy as np
+import optax
 from jax.config import config
+
+import wandb
 
 config.update("jax_debug_nans", True)  # break on nans
 # config.update('jax_disable_jit', True)
@@ -45,9 +52,6 @@ def build_sample_action(policy_model):
     return sample_action
 
 
-import flax.linen as nn
-
-
 class Policy(nn.Module):
     action_dims: int
 
@@ -73,11 +77,6 @@ class Value(nn.Module):
         return x
 
 
-import jax
-import gym
-import optax
-
-
 def optim_update_fcn(optim):
     @jax.jit
     def update_step(params, grads, opt_state):
@@ -89,13 +88,9 @@ def optim_update_fcn(optim):
     return update_step
 
 
-import wandb
-
 if __name__ == "__main__":
-    env = gym.wrappers.RecordVideo(gym.make("LunarLanderContinuous-v2"), "./monitor/")
-    # env = gym.make("LunarLanderContinuous-v2")
-    # wandb.init(project="cleanrl.benchmark", entity="felipemartins", mode="disabled")
-    wandb.init(project="cleanrl.benchmark", entity="felipemartins", monitor_gym=True)
+    env = gym.wrappers.RecordVideo(gym.make("MountainCarContinuous-v0"), "./monitor/")
+    wandb.init(project="rl-jax", entity="felipemartins", monitor_gym=True)
     rng = jax.random.PRNGKey(0)
     epsilon = 0.1
     c1 = 0.25
@@ -104,6 +99,7 @@ if __name__ == "__main__":
     update_epochs = 3
     learning_rate = 7e-4
     max_grad_norm = 0.5
+    total_train_eps = 50000
 
     p_model = Policy(env.action_space.shape[0])
     v_model = Value()
@@ -130,10 +126,8 @@ if __name__ == "__main__":
     sample_action = jax.jit(build_sample_action(p_model))
     get_v = jax.jit(v_model.apply)
 
-    import time
-
     st = time.time()
-    for ep in range(50000):
+    for ep in range(total_train_eps):
         done = False
         s = env.reset()
 
@@ -163,7 +157,6 @@ if __name__ == "__main__":
         returns[-1] = r_v[-1]
         for t in reversed(range(steps - 1)):
             returns[t] = r_v[t] + gamma * returns[t + 1]
-        # advantages are returns - baseline, value estimates in our case
         advantages = [returns[i] - v_v[i] for i in range(steps)]
 
         s_j, a_j, lp_j, r_j, adv_j = (
@@ -191,8 +184,7 @@ if __name__ == "__main__":
                 steps_s=steps / (et - st),
                 mean_return=sum(returns) / steps,
                 mean_adv=adv_j.mean(),
-                logstd_param0=p_params["params"]["logstd"][0],
-                logstd_param1=p_params["params"]["logstd"][1],
+                logstd_param=p_params["params"]["logstd"],
             )
         )
         wandb.log(info_mean)
