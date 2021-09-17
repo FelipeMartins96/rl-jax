@@ -58,8 +58,8 @@ class Policy(nn.Module):
         x = nn.Dense(84)(x)  # 84
         x = nn.tanh(x)
         mean = nn.tanh(nn.Dense(self.action_dims)(x))
-        sigma = nn.relu(nn.Dense(self.action_dims)(x))
-        return mean, sigma + 0.00001
+        logstd = self.param("logstd", lambda rng, shape : jnp.zeros(shape), self.action_dims)
+        return mean, jnp.exp(logstd)
 
 
 class Value(nn.Module):
@@ -91,12 +91,14 @@ import wandb
 
 if __name__ == "__main__":
     env = gym.wrappers.Monitor(gym.make("Pendulum-v0"), "./monitor/", force=True)
-    wandb.init(monitor_gym=True, project="rl-jax", entity="felipemartins")
+    # env = gym.make("Pendulum-v0")
+    # wandb.init(project="cleanrl.benchmark", entity="felipemartins", mode="disabled")
+    wandb.init(project="cleanrl.benchmark", entity="felipemartins", monitor_gym=True)
     rng = jax.random.PRNGKey(0)
     epsilon = 0.1
-    c1 = 1.0
+    c1 = 0.25
     c2 = 0.01
-    gamma = 0.99
+    gamma = 0.95
 
     p_model = Policy(env.action_space.shape[0])
     v_model = Value()
@@ -109,8 +111,8 @@ if __name__ == "__main__":
     ppo_loss_grad = jax.jit(jax.grad(ppo_loss, argnums=[0, 1], has_aux=True))
     ppo_loss_grad_vmap = jax.vmap(ppo_loss_grad, in_axes=(None, None, 0, 0, 0, 0, 0))
 
-    p_optim = optax.adam(0.001)
-    v_optim = optax.adam(0.001)
+    p_optim = optax.adam(7e-4)
+    v_optim = optax.adam(7e-4)
 
     p_opt_state = p_optim.init(p_params)
     v_opt_state = v_optim.init(v_params)
@@ -125,7 +127,6 @@ if __name__ == "__main__":
 
     st = time.time()
     for ep in range(50000):
-        # print(p_params)
         done = False
         s = env.reset()
 
@@ -138,16 +139,16 @@ if __name__ == "__main__":
         while not done:
             rng, a_key = jax.random.split(rng, 2)
             a, logprob = sample_action(a_key, p_params, s)
-            clipped_a = jnp.clip(a, env.action_space.low, env.action_space.high)
+            # Scaling to environment, assumes env action_space is simmetric around 0
+            clipped_a = jnp.clip(a*env.action_space.high, env.action_space.low, env.action_space.high)
             s_, r, done, _ = env.step(clipped_a)
-            # env.render()
             v = get_v(v_params, s)
             s_v.append(s)
             a_v.append(a)
             logprob_v.append(logprob)
             v_v.append(v)
             r_v.append(r)
-
+        
         steps = len(r_v)
         returns = np.zeros_like(r_v)
         returns[-1] = r_v[-1]
@@ -180,7 +181,8 @@ if __name__ == "__main__":
                 mean_v=sum(v_v) / steps,
                 steps_s=steps / (et - st),
                 mean_return=sum(returns) / steps,
-                mean_adv=adv_j.mean()
+                mean_adv=adv_j.mean(),
+                logstd_param=p_params['params']['logstd'],
             )
         )
         wandb.log(info_mean)
