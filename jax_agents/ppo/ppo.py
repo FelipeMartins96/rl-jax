@@ -25,7 +25,7 @@ def build_ppo_loss(policy_model, value_model, epsilon, c1, c2):
 
         S = dist.entropy()
 
-        loss = -l_clip + c1 * l_vf - c2 * S
+        loss = +l_clip - c1 * l_vf + c2 * S
 
         info = dict(l_clip=l_clip, l_vf=l_vf, S=S, loss=loss)
 
@@ -58,7 +58,9 @@ class Policy(nn.Module):
         x = nn.Dense(84)(x)  # 84
         x = nn.tanh(x)
         mean = nn.tanh(nn.Dense(self.action_dims)(x))
-        logstd = self.param("logstd", lambda rng, shape : jnp.zeros(shape), self.action_dims)
+        logstd = self.param(
+            "logstd", lambda rng, shape: jnp.zeros(shape), self.action_dims
+        )
         return mean, jnp.exp(logstd)
 
 
@@ -100,6 +102,8 @@ if __name__ == "__main__":
     c2 = 0.01
     gamma = 0.99
     update_epochs = 3
+    learning_rate = 7e-4
+    max_grad_norm = 0.5
 
     p_model = Policy(env.action_space.shape[0])
     v_model = Value()
@@ -112,14 +116,16 @@ if __name__ == "__main__":
     ppo_loss_grad = jax.jit(jax.grad(ppo_loss, argnums=[0, 1], has_aux=True))
     ppo_loss_grad_vmap = jax.vmap(ppo_loss_grad, in_axes=(None, None, 0, 0, 0, 0, 0))
 
-    p_optim = optax.adam(7e-4)
-    v_optim = optax.adam(7e-4)
+    optim = optax.chain(
+        optax.clip_by_global_norm(max_grad_norm),
+        optax.scale_by_adam(),
+        optax.scale(learning_rate),
+    )
 
-    p_opt_state = p_optim.init(p_params)
-    v_opt_state = v_optim.init(v_params)
+    p_opt_state = optim.init(p_params)
+    v_opt_state = optim.init(v_params)
 
-    p_update_step = optim_update_fcn(p_optim)
-    v_update_step = optim_update_fcn(v_optim)
+    optim_update_step = optim_update_fcn(optim)
 
     sample_action = jax.jit(build_sample_action(p_model))
     get_v = jax.jit(v_model.apply)
@@ -141,7 +147,9 @@ if __name__ == "__main__":
             rng, a_key = jax.random.split(rng, 2)
             a, logprob = sample_action(a_key, p_params, s)
             # Scaling to environment, assumes env action_space is simmetric around 0
-            clipped_a = np.clip(a*env.action_space.high, env.action_space.low, env.action_space.high)
+            clipped_a = np.clip(
+                a * env.action_space.high, env.action_space.low, env.action_space.high
+            )
             s_, r, done, _ = env.step(np.array(clipped_a))
             v = get_v(v_params, s)
             s_v.append(s)
@@ -149,7 +157,7 @@ if __name__ == "__main__":
             logprob_v.append(logprob)
             v_v.append(v)
             r_v.append(r)
-        
+
         steps = len(r_v)
         returns = np.zeros_like(r_v)
         returns[-1] = r_v[-1]
@@ -171,8 +179,8 @@ if __name__ == "__main__":
                 p_params, v_params, s_j, a_j, lp_j, r_j, adv_j
             )
 
-            p_params, p_opt_state = p_update_step(p_params, p_grad, p_opt_state)
-            v_params, v_opt_state = v_update_step(v_params, v_grad, v_opt_state)
+            p_params, p_opt_state = optim_update_step(p_params, p_grad, p_opt_state)
+            v_params, v_opt_state = optim_update_step(v_params, v_grad, v_opt_state)
 
         et = time.time()
         info_mean = jax.tree_map(lambda x: x.mean(axis=0), info)
@@ -183,8 +191,8 @@ if __name__ == "__main__":
                 steps_s=steps / (et - st),
                 mean_return=sum(returns) / steps,
                 mean_adv=adv_j.mean(),
-                logstd_param0=p_params['params']['logstd'][0],
-                logstd_param1=p_params['params']['logstd'][1],
+                logstd_param0=p_params["params"]["logstd"][0],
+                logstd_param1=p_params["params"]["logstd"][1],
             )
         )
         wandb.log(info_mean)
