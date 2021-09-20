@@ -99,7 +99,9 @@ if __name__ == "__main__":
     update_epochs = 3
     learning_rate = 7e-4
     max_grad_norm = 0.5
-    total_train_eps = 50000
+    num_updates = int(1e5)
+    num_steps = 2048
+    gae_lambda = 0.95
 
     p_model = Policy(env.action_space.shape[0])
     v_model = Value()
@@ -127,44 +129,62 @@ if __name__ == "__main__":
     get_v = jax.jit(v_model.apply)
 
     st = time.time()
-    for ep in range(total_train_eps):
-        done = False
-        s = env.reset()
+    next_obs = env.reset()
+    total_steps = 0
+    done = False
+    ep_rw = 0
+    for update_index in range(num_updates):
+        
+        obs_rollout = []
+        actions_rollout = []
+        logprobs_rollout = []
+        rewards_rollout = []
+        dones_rollout = []
 
-        s_v = []
-        a_v = []
-        logprob_v = []
-        v_v = []
-        r_v = []
+        ep_rws = []
 
-        while not done:
+        for step_index in range(num_steps):
+            total_steps += 1
+
+            obs = next_obs
+
             rng, a_key = jax.random.split(rng, 2)
-            a, logprob = sample_action(a_key, p_params, s)
+            a, logprob = sample_action(a_key, p_params, obs)
             # Scaling to environment, assumes env action_space is simmetric around 0
             clipped_a = np.clip(
                 a * env.action_space.high, env.action_space.low, env.action_space.high
             )
-            s_, r, done, _ = env.step(np.array(clipped_a))
-            v = get_v(v_params, s)
-            s_v.append(s)
-            a_v.append(a)
-            logprob_v.append(logprob)
-            v_v.append(v)
-            r_v.append(r)
 
-        steps = len(r_v)
-        returns = np.zeros_like(r_v)
-        returns[-1] = r_v[-1]
-        for t in reversed(range(steps - 1)):
-            returns[t] = r_v[t] + gamma * returns[t + 1]
-        advantages = [returns[i] - v_v[i] for i in range(steps)]
+            next_obs, reward, done, info = env.step(np.array(clipped_a))
+            ep_rw += reward
+
+            obs_rollout.append(obs)
+            actions_rollout.append(a)
+            logprobs_rollout.append(logprob)
+            rewards_rollout.append(reward)
+            dones_rollout.append(done)
+
+            if done:
+                next_obs = env.reset()
+                ep_rws.append(ep_rw)
+                ep_rw = 0
+
+        advantages_rollout = np.zeros_like(rewards_rollout)
+        returns_rollout = np.zeros_like(rewards_rollout)
+        obs_rollout.append(next_obs)
+        values_rollout = get_v(v_params, obs_rollout).squeeze()
+        lastgaelam = 0
+        for t in reversed(range(num_steps)):
+            delta = rewards_rollout[t] + gamma * values_rollout[t+1] * dones_rollout[t] - values_rollout[t]
+            advantages_rollout[t] = lastgaelam = delta + gamma * gae_lambda * dones_rollout[t] * lastgaelam
+        returns_rollout = advantages_rollout + values_rollout[:-1]
 
         s_j, a_j, lp_j, r_j, adv_j = (
-            jnp.array(s_v),
-            jnp.array(a_v),
-            jnp.array(logprob_v),
-            jnp.array(returns),
-            jnp.array(advantages),
+            jnp.array(obs_rollout[:-1]),
+            jnp.array(actions_rollout),
+            jnp.array(logprobs_rollout),
+            jnp.array(returns_rollout),
+            jnp.array(advantages_rollout),
         )
 
         for i in range(update_epochs):
@@ -175,17 +195,21 @@ if __name__ == "__main__":
             p_params, p_opt_state = optim_update_step(p_params, p_grad, p_opt_state)
             v_params, v_opt_state = optim_update_step(v_params, v_grad, v_opt_state)
 
+
+
         et = time.time()
         info_mean = jax.tree_map(lambda x: x.mean(axis=0), info)
-        info_mean.update(
-            dict(
-                rw=sum(r_v),
-                mean_v=sum(v_v) / steps,
-                steps_s=steps / (et - st),
-                mean_return=sum(returns) / steps,
-                mean_adv=adv_j.mean(),
-                logstd_param=p_params["params"]["logstd"],
+        if len(ep_rws):
+            info_mean.update(
+                dict(
+                    ep_rw_mean=sum(ep_rws)/len(ep_rws)
+                    # rw=sum(r_v),
+                    # mean_v=sum(v_v) / steps,
+                    # steps_s=steps / (et - st),
+                    # mean_return=sum(returns) / steps,
+                    # mean_adv=adv_j.mean(),
+                    # logstd_param=p_params["params"]["logstd"],
+                )
             )
-        )
         wandb.log(info_mean)
         st = et
