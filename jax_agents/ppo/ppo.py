@@ -88,6 +88,71 @@ def optim_update_fcn(optim):
     return update_step
 
 
+class RolloutBuffer:
+    """Circular replay buffer for gym environments transitions"""
+
+    def __init__(self, environment, capacity):
+        """Initialize a replay buffer for the given environment
+
+        Args:
+            environment: gym environment.
+            capacity: maximum number of transitions to store in the buffer.
+        """
+        self._capacity = capacity
+        self._num_added = 0
+
+        if isinstance(environment.action_space, gym.spaces.Discrete):
+            action_dim = (1,)
+        else:
+            action_dim = environment.action_space.shape
+
+        state_dim = environment.observation_space.shape
+
+        # Preallocate memory
+        self._observations = np.empty((capacity, *state_dim), dtype=np.float32)
+        self._actions = np.empty((capacity, *action_dim), dtype=np.float32)
+        self._logprobs = np.empty((capacity, 1), dtype=np.float32)
+        self._rewards = np.empty((capacity, 1), dtype=np.float32)
+        self._dones = np.empty((capacity, 1), dtype=np.float32)
+        self._next_observation = np.empty((1, *state_dim), dtype=np.float32)
+
+    def add(self, observation, action, logprob, reward, done, next_observation):
+        """Add a transition to the buffer."""
+        if self._num_added >= self._capacity:
+            raise ValueError("Adding transition to full buffer")
+
+        self._observations[self._num_added] = observation
+        self._actions[self._num_added] = action
+        self._logprobs[self._num_added] = logprob
+        self._rewards[self._num_added] = reward
+        self._dones[self._num_added] = done
+        self._next_observation[0] = next_observation
+
+        self._num_added += 1
+
+    def get_rollout(self):
+        """Sample a batch of transitions uniformly."""
+        if self.size != self._capacity:
+            raise ValueError("Incomplete Rollout")
+
+        return (
+            self._observations,
+            self._actions,
+            self._logprobs,
+            self._rewards,
+            self._dones,
+            self._next_observation,
+        )
+
+    def clear(self):
+        self._num_added = 0
+
+    @property
+    def size(self) -> int:
+        """Number of transitions in the buffer"""
+        return self._num_added
+
+
 if __name__ == "__main__":
     env = gym.wrappers.RecordVideo(gym.make("MountainCarContinuous-v0"), "./monitor/")
     wandb.init(project="rl-jax", entity="felipemartins", monitor_gym=True)
@@ -127,6 +192,9 @@ if __name__ == "__main__":
 
     sample_action = jax.jit(build_sample_action(p_model))
     get_v = jax.jit(v_model.apply)
+    get_v_vmap = jax.vmap(get_v, in_axes=(None, 0))
+
+    buffer = RolloutBuffer(env, num_steps)
 
     st = time.time()
     next_obs = env.reset()
@@ -134,15 +202,11 @@ if __name__ == "__main__":
     done = False
     ep_rw = 0
     for update_index in range(num_updates):
-        
-        obs_rollout = []
-        actions_rollout = []
-        logprobs_rollout = []
-        rewards_rollout = []
-        dones_rollout = []
 
+        buffer.clear()
         ep_rws = []
 
+        # Get Rollout
         for step_index in range(num_steps):
             total_steps += 1
 
@@ -158,35 +222,46 @@ if __name__ == "__main__":
             next_obs, reward, done, info = env.step(np.array(clipped_a))
             ep_rw += reward
 
-            obs_rollout.append(obs)
-            actions_rollout.append(a)
-            logprobs_rollout.append(logprob)
-            rewards_rollout.append(reward)
-            dones_rollout.append(done)
+            buffer.add(obs, a, logprob, reward, done, next_obs)
 
             if done:
                 next_obs = env.reset()
                 ep_rws.append(ep_rw)
                 ep_rw = 0
 
-        advantages_rollout = np.zeros_like(rewards_rollout)
-        returns_rollout = np.zeros_like(rewards_rollout)
-        obs_rollout.append(next_obs)
-        values_rollout = get_v(v_params, obs_rollout).squeeze()
+        # Calculate Advantages
+        (
+            obs_rollout,
+            a_rollout,
+            logprob_rollout,
+            r_rollout,
+            d_rollout,
+            next_obs_rollout,
+        ) = buffer.get_rollout()
+
+        advantages_rollout = np.zeros_like(r_rollout)
+        returns_rollout = np.zeros_like(r_rollout)
+        values_rollout = get_v_vmap(v_params, np.concatenate([obs_rollout, next_obs_rollout], axis=0))
         lastgaelam = 0
         for t in reversed(range(num_steps)):
-            delta = rewards_rollout[t] + gamma * values_rollout[t+1] * dones_rollout[t] - values_rollout[t]
-            advantages_rollout[t] = lastgaelam = delta + gamma * gae_lambda * dones_rollout[t] * lastgaelam
+            delta = (
+                r_rollout[t]
+                + gamma * values_rollout[t + 1] * d_rollout[t]
+                - values_rollout[t]
+            )
+            advantages_rollout[t] = lastgaelam = (
+                delta + gamma * gae_lambda * d_rollout[t] * lastgaelam
+            )
         returns_rollout = advantages_rollout + values_rollout[:-1]
-
         s_j, a_j, lp_j, r_j, adv_j = (
-            jnp.array(obs_rollout[:-1]),
-            jnp.array(actions_rollout),
-            jnp.array(logprobs_rollout),
+            jnp.array(obs_rollout),
+            jnp.array(a_rollout),
+            jnp.array(logprob_rollout),
             jnp.array(returns_rollout),
             jnp.array(advantages_rollout),
         )
 
+        # Update Networks
         for i in range(update_epochs):
             (p_grad, v_grad), info = ppo_loss_grad_vmap(
                 p_params, v_params, s_j, a_j, lp_j, r_j, adv_j
@@ -195,14 +270,14 @@ if __name__ == "__main__":
             p_params, p_opt_state = optim_update_step(p_params, p_grad, p_opt_state)
             v_params, v_opt_state = optim_update_step(v_params, v_grad, v_opt_state)
 
-
-
+        # Logging
         et = time.time()
         info_mean = jax.tree_map(lambda x: x.mean(axis=0), info)
         if len(ep_rws):
             info_mean.update(
                 dict(
-                    ep_rw_mean=sum(ep_rws)/len(ep_rws)
+                    ep_rw_mean=sum(ep_rws)
+                    / len(ep_rws)
                     # rw=sum(r_v),
                     # mean_v=sum(v_v) / steps,
                     # steps_s=steps / (et - st),
