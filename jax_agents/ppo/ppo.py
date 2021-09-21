@@ -31,11 +31,16 @@ def build_ppo_loss(policy_model, value_model, epsilon, c1, c2):
         value = value_model.apply(v_params, observation)
         l_vf = jnp.square(value - target_value)
 
-        S = dist.entropy()
+        S = jnp.expand_dims(dist.entropy(), 0)
 
-        loss = +l_clip - c1 * l_vf + c2 * S
+        l1 = -l_clip
+        l2 = c1 * l_vf
+        l3 = -c2 * S
 
-        info = dict(l_clip=l_clip, l_vf=l_vf, S=S, loss=loss)
+
+        loss = l1 + l2 + l3
+
+        info = dict(l_clip=l1, l_vf=l2, S=l3, loss=loss)
 
         return loss.squeeze(), info
 
@@ -180,7 +185,7 @@ class RolloutBuffer:
 
 
 if __name__ == "__main__":
-    env = gym.wrappers.RecordVideo(gym.make("MountainCarContinuous-v0"), "./monitor/")
+    env = gym.wrappers.RecordVideo(gym.make("Pendulum-v0"), "./monitor/")
     wandb.init(project="rl-jax", entity="felipemartins", monitor_gym=True, save_code=True)
     np.random.seed(0)
     env.seed(0)
@@ -192,11 +197,15 @@ if __name__ == "__main__":
     c2 = 0.01
     gamma = 0.99
     update_epochs = 3
-    learning_rate = 7e-4
+    learning_rate = 3e-4
     max_grad_norm = 0.5
     num_updates = int(1e5)
-    num_steps = 2048
+    num_steps = 512
     gae_lambda = 0.95
+    num_envs = 1
+    n_minibatches = 32
+    batch_size = num_envs * num_steps
+    minibatch_size = batch_size // n_minibatches
 
     p_model = Policy(env.action_space.shape[0])
     v_model = Value()
@@ -211,8 +220,8 @@ if __name__ == "__main__":
 
     optim = optax.chain(
         optax.clip_by_global_norm(max_grad_norm),
-        optax.scale_by_adam(),
-        optax.scale(learning_rate),
+        optax.scale_by_adam(eps=1e-5),
+        optax.scale(-learning_rate),
     )
 
     p_opt_state = optim.init(p_params)
