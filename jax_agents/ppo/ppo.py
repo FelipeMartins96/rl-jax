@@ -181,7 +181,7 @@ class RolloutBuffer:
 
 if __name__ == "__main__":
     env = gym.wrappers.RecordVideo(gym.make("MountainCarContinuous-v0"), "./monitor/")
-    wandb.init(project="rl-jax", entity="felipemartins", monitor_gym=True)
+    wandb.init(project="rl-jax", entity="felipemartins", monitor_gym=True, save_code=True)
     np.random.seed(0)
     env.seed(0)
     env.action_space.seed(0)
