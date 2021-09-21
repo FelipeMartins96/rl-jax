@@ -263,6 +263,9 @@ if __name__ == "__main__":
         s_j, a_j, lp_j, r_j, adv_j = calculate_gae(v_params, buffer.get_rollout())
 
         # Update Networks
+
+        # Normalize advantages
+        adv_j = (adv_j - adv_j.mean()) / (adv_j.std() + 1e-8)
         for i in range(update_epochs):
             (p_grad, v_grad), info = ppo_loss_grad_vmap(
                 p_params, v_params, s_j, a_j, lp_j, r_j, adv_j
