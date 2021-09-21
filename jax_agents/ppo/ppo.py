@@ -271,17 +271,23 @@ if __name__ == "__main__":
         # Calculate Advantages
         s_j, a_j, lp_j, r_j, adv_j = calculate_gae(v_params, buffer.get_rollout())
 
+
         # Update Networks
 
-        # Normalize advantages
-        adv_j = (adv_j - adv_j.mean()) / (adv_j.std() + 1e-8)
         for i in range(update_epochs):
-            (p_grad, v_grad), info = ppo_loss_grad_vmap(
-                p_params, v_params, s_j, a_j, lp_j, r_j, adv_j
-            )
+            for start in range(0, batch_size, minibatch_size):
+                end = start + minibatch_size
+                # Normalize advantages
+                adv_mb = adv_j[start:end]
+                adv_mb = (adv_mb - adv_mb.mean()) / (adv_mb.std() + 1e-8)
 
-            p_params, p_opt_state = optim_update_step(p_params, p_grad, p_opt_state)
-            v_params, v_opt_state = optim_update_step(v_params, v_grad, v_opt_state)
+                (p_grad, v_grad), info = ppo_loss_grad_vmap(
+                    p_params, v_params, s_j[start:end], a_j[start:end], lp_j[start:end], r_j[start:end], adv_mb
+                )
+
+                p_params, p_opt_state = optim_update_step(p_params, p_grad, p_opt_state)
+                v_params, v_opt_state = optim_update_step(v_params, v_grad, v_opt_state)
+
 
         # Logging
         et = time.time()
