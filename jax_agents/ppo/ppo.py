@@ -63,11 +63,11 @@ class Policy(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        x = nn.Dense(120)(x)  # 120
+        x = nn.Dense(120, kernel_init=nn.initializers.orthogonal(jnp.sqrt(2)))(x)  # 120
         x = nn.tanh(x)
-        x = nn.Dense(84)(x)  # 84
+        x = nn.Dense(84, kernel_init=nn.initializers.orthogonal(jnp.sqrt(2)))(x)  # 84
         x = nn.tanh(x)
-        mean = nn.tanh(nn.Dense(self.action_dims)(x))
+        mean = nn.tanh(nn.Dense(self.action_dims, kernel_init=nn.initializers.orthogonal(0.01))(x))
         logstd = self.param(
             "logstd", lambda rng, shape: jnp.zeros(shape), self.action_dims
         )
@@ -77,9 +77,9 @@ class Policy(nn.Module):
 class Value(nn.Module):
     @nn.compact
     def __call__(self, x):
-        x = nn.Dense(64)(x)
+        x = nn.Dense(64, kernel_init=nn.initializers.orthogonal(jnp.sqrt(2)))(x)
         x = nn.tanh(x)
-        x = nn.Dense(1)(x)
+        x = nn.Dense(1, kernel_init=nn.initializers.orthogonal(1))(x)
         return x
 
 
