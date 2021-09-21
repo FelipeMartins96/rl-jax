@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 from jax.config import config
+import tqdm
 
 import wandb
 
@@ -181,6 +182,10 @@ class RolloutBuffer:
 if __name__ == "__main__":
     env = gym.wrappers.RecordVideo(gym.make("MountainCarContinuous-v0"), "./monitor/")
     wandb.init(project="rl-jax", entity="felipemartins", monitor_gym=True)
+    np.random.seed(0)
+    env.seed(0)
+    env.action_space.seed(0)
+    env.observation_space.seed(0)
     rng = jax.random.PRNGKey(0)
     epsilon = 0.1
     c1 = 0.25
@@ -226,7 +231,7 @@ if __name__ == "__main__":
     total_steps = 0
     done = False
     ep_rw = 0
-    for update_index in range(num_updates):
+    for update_index in tqdm.tqdm(range(num_updates), smoothing=0.1):
 
         buffer.clear()
         ep_rws = []
