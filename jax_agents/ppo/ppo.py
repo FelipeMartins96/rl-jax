@@ -87,6 +87,31 @@ def optim_update_fcn(optim):
 
     return update_step
 
+def get_calculate_gae_fn(v_model, gamma, gae_lambda, num_steps):
+    get_v = jax.jit(v_model.apply)
+    get_v_vmap = jax.vmap(get_v, in_axes=(None, 0))
+
+    def gae_advantages(v_params, rollout):
+        observations, actions, logprobs, rewards, dones, next_observation = rollout
+        advantages = np.zeros_like(rewards)
+        returns = np.zeros_like(rewards)
+        values = get_v_vmap(v_params, np.concatenate([observations, next_observation], axis=0))
+        lastgaelam = 0
+        for t in reversed(range(num_steps)):
+            delta = rewards[t] + gamma * values[t + 1] * (1 - dones[t]) - values[t]
+            advantages[t] = delta + gamma * gae_lambda * (1 - dones[t]) * lastgaelam
+            lastgaelam = advantages[t]
+            returns[t] = advantages[t] + values[t]
+
+        return  (
+            jnp.array(observations),
+            jnp.array(actions),
+            jnp.array(logprobs),
+            jnp.array(returns),
+            jnp.array(advantages),
+        )
+    
+    return gae_advantages
 
 class RolloutBuffer:
     """Circular replay buffer for gym environments transitions"""
@@ -191,8 +216,8 @@ if __name__ == "__main__":
     optim_update_step = optim_update_fcn(optim)
 
     sample_action = jax.jit(build_sample_action(p_model))
-    get_v = jax.jit(v_model.apply)
-    get_v_vmap = jax.vmap(get_v, in_axes=(None, 0))
+    
+    calculate_gae = get_calculate_gae_fn(v_model, gamma, gae_lambda, num_steps)
 
     buffer = RolloutBuffer(env, num_steps)
 
@@ -230,36 +255,7 @@ if __name__ == "__main__":
                 ep_rw = 0
 
         # Calculate Advantages
-        (
-            obs_rollout,
-            a_rollout,
-            logprob_rollout,
-            r_rollout,
-            d_rollout,
-            next_obs_rollout,
-        ) = buffer.get_rollout()
-
-        advantages_rollout = np.zeros_like(r_rollout)
-        returns_rollout = np.zeros_like(r_rollout)
-        values_rollout = get_v_vmap(v_params, np.concatenate([obs_rollout, next_obs_rollout], axis=0))
-        lastgaelam = 0
-        for t in reversed(range(num_steps)):
-            delta = (
-                r_rollout[t]
-                + gamma * values_rollout[t + 1] * d_rollout[t]
-                - values_rollout[t]
-            )
-            advantages_rollout[t] = lastgaelam = (
-                delta + gamma * gae_lambda * d_rollout[t] * lastgaelam
-            )
-        returns_rollout = advantages_rollout + values_rollout[:-1]
-        s_j, a_j, lp_j, r_j, adv_j = (
-            jnp.array(obs_rollout),
-            jnp.array(a_rollout),
-            jnp.array(logprob_rollout),
-            jnp.array(returns_rollout),
-            jnp.array(advantages_rollout),
-        )
+        s_j, a_j, lp_j, r_j, adv_j = calculate_gae(v_params, buffer.get_rollout())
 
         # Update Networks
         for i in range(update_epochs):
