@@ -7,12 +7,13 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
+import pybullet_envs
 from jax.config import config
 import tqdm
 
 import wandb
 
-config.update("jax_debug_nans", True)  # break on nans
+# config.update("jax_debug_nans", True)  # break on nans
 # config.update('jax_disable_jit', True)
 
 
@@ -37,10 +38,11 @@ def build_ppo_loss(policy_model, value_model, epsilon, c1, c2):
         l2 = c1 * l_vf
         l3 = -c2 * S
 
-
         loss = l1 + l2 + l3
 
-        info = dict(l_clip=l1, l_vf=l2, S=l3, loss=loss)
+        a_kl = logprob - new_logprob
+
+        info = dict(l_clip=l1, l_vf=l_vf, S=S, loss=loss, approx_kl=a_kl)
 
         return loss.squeeze(), info
 
@@ -67,7 +69,9 @@ class Policy(nn.Module):
         x = nn.tanh(x)
         x = nn.Dense(84, kernel_init=nn.initializers.orthogonal(jnp.sqrt(2)))(x)  # 84
         x = nn.tanh(x)
-        mean = nn.tanh(nn.Dense(self.action_dims, kernel_init=nn.initializers.orthogonal(0.01))(x))
+        mean = nn.tanh(
+            nn.Dense(self.action_dims, kernel_init=nn.initializers.orthogonal(0.01))(x)
+        )
         logstd = self.param(
             "logstd", lambda rng, shape: jnp.zeros(shape), self.action_dims
         )
@@ -93,6 +97,7 @@ def optim_update_fcn(optim):
 
     return update_step
 
+
 def get_calculate_gae_fn(v_model, gamma, gae_lambda, num_steps):
     get_v = jax.jit(v_model.apply)
     get_v_vmap = jax.vmap(get_v, in_axes=(None, 0))
@@ -101,7 +106,9 @@ def get_calculate_gae_fn(v_model, gamma, gae_lambda, num_steps):
         observations, actions, logprobs, rewards, dones, next_observation = rollout
         advantages = np.zeros_like(rewards)
         returns = np.zeros_like(rewards)
-        values = get_v_vmap(v_params, np.concatenate([observations, next_observation], axis=0))
+        values = get_v_vmap(
+            v_params, np.concatenate([observations, next_observation], axis=0)
+        )
         lastgaelam = 0
         for t in reversed(range(num_steps)):
             delta = rewards[t] + gamma * values[t + 1] * (1 - dones[t]) - values[t]
@@ -109,15 +116,16 @@ def get_calculate_gae_fn(v_model, gamma, gae_lambda, num_steps):
             lastgaelam = advantages[t]
             returns[t] = advantages[t] + values[t]
 
-        return  (
+        return (
             jnp.array(observations),
             jnp.array(actions),
             jnp.array(logprobs),
             jnp.array(returns),
             jnp.array(advantages),
         )
-    
+
     return gae_advantages
+
 
 class RolloutBuffer:
     """Circular replay buffer for gym environments transitions"""
@@ -185,27 +193,35 @@ class RolloutBuffer:
 
 
 if __name__ == "__main__":
-    env = gym.wrappers.RecordVideo(gym.make("MountainCarContinuous-v0"), "./monitor/")
+    env = gym.make("HopperBulletEnv-v0")
     wandb.init(project="rl-jax", entity="felipemartins", monitor_gym=True, save_code=True)
-    np.random.seed(0)
+    env = gym.wrappers.RecordVideo(env, "./monitor/")
     env.seed(0)
-    env.action_space.seed(0)
-    env.observation_space.seed(0)
-    rng = jax.random.PRNGKey(0)
-    epsilon = 0.1
-    c1 = 0.25
-    c2 = 0.01
-    gamma = 0.99
-    update_epochs = 3
+    wandb.init(
+        project="rl-jax", entity="felipemartins", monitor_gym=True, save_code=True
+    )
     learning_rate = 3e-4
-    max_grad_norm = 0.5
-    num_updates = int(1e5)
-    num_steps = 512
-    gae_lambda = 0.95
-    num_envs = 1
+    seed = 1
+    total_timesteps = 2000000
     n_minibatches = 32
-    batch_size = num_envs * num_steps
-    minibatch_size = batch_size // n_minibatches
+    num_steps = 2048
+    num_envs = 1
+    gamma = 0.99
+    gae_lambda = 0.95
+    c2 = 0.0  # ent-coef
+    c1 = 0.5  # vf-coef
+    max_grad_norm = 0.5
+    epsilon = 0.2  # clip-coef
+    update_epochs = 10
+    # target-kl = 0.03
+    batch_size = int(num_envs * num_steps)
+    minibatch_size = int(batch_size // n_minibatches)
+
+    np.random.seed(seed)
+    env.seed(seed)
+    env.action_space.seed(seed)
+    env.observation_space.seed(seed)
+    rng = jax.random.PRNGKey(seed)
 
     p_model = Policy(env.action_space.shape[0])
     v_model = Value()
@@ -230,7 +246,7 @@ if __name__ == "__main__":
     optim_update_step = optim_update_fcn(optim)
 
     sample_action = jax.jit(build_sample_action(p_model))
-    
+
     calculate_gae = get_calculate_gae_fn(v_model, gamma, gae_lambda, num_steps)
 
     buffer = RolloutBuffer(env, num_steps)
@@ -240,70 +256,89 @@ if __name__ == "__main__":
     total_steps = 0
     done = False
     ep_rw = 0
-    for update_index in tqdm.tqdm(range(num_updates), smoothing=0.1):
 
-        buffer.clear()
-        ep_rws = []
+    num_updates = total_timesteps // batch_size
+    with tqdm.tqdm(total=total_timesteps) as pbar:
+        for update_index in range(num_updates):
 
-        # Get Rollout
-        for step_index in range(num_steps):
-            total_steps += 1
+            buffer.clear()
+            ep_rws = []
 
-            obs = next_obs
+            # Get Rollout
+            for step_index in range(num_steps):
+                total_steps += 1
 
-            rng, a_key = jax.random.split(rng, 2)
-            a, logprob = sample_action(a_key, p_params, obs)
-            # Scaling to environment, assumes env action_space is simmetric around 0
-            clipped_a = np.clip(
-                a * env.action_space.high, env.action_space.low, env.action_space.high
-            )
+                obs = next_obs
 
-            next_obs, reward, done, info = env.step(np.array(clipped_a))
-            ep_rw += reward
-
-            buffer.add(obs, a, logprob, reward, done, next_obs)
-
-            if done:
-                next_obs = env.reset()
-                ep_rws.append(ep_rw)
-                ep_rw = 0
-
-        # Calculate Advantages
-        s_j, a_j, lp_j, r_j, adv_j = calculate_gae(v_params, buffer.get_rollout())
-
-
-        # Update Networks
-
-        for i in range(update_epochs):
-            for start in range(0, batch_size, minibatch_size):
-                end = start + minibatch_size
-                # Normalize advantages
-                adv_mb = adv_j[start:end]
-                adv_mb = (adv_mb - adv_mb.mean()) / (adv_mb.std() + 1e-8)
-
-                (p_grad, v_grad), info = ppo_loss_grad_vmap(
-                    p_params, v_params, s_j[start:end], a_j[start:end], lp_j[start:end], r_j[start:end], adv_mb
+                rng, a_key = jax.random.split(rng, 2)
+                a, logprob = sample_action(a_key, p_params, obs)
+                # Scaling to environment, assumes env action_space is simmetric around 0
+                clipped_a = np.clip(
+                    a * env.action_space.high, env.action_space.low, env.action_space.high
                 )
 
-                p_params, p_opt_state = optim_update_step(p_params, p_grad, p_opt_state)
-                v_params, v_opt_state = optim_update_step(v_params, v_grad, v_opt_state)
+                next_obs, reward, done, info = env.step(np.array(clipped_a))
+                ep_rw += reward
 
+                buffer.add(obs, a, logprob, reward, done, next_obs)
 
-        # Logging
-        et = time.time()
-        info_mean = jax.tree_map(lambda x: x.mean(axis=0), info)
-        if len(ep_rws):
-            info_mean.update(
+                if done:
+                    next_obs = env.reset()
+                    ep_rws.append(ep_rw)
+                    ep_rw = 0
+
+            # Calculate Advantages
+            s_j, a_j, lp_j, r_j, adv_j = calculate_gae(v_params, buffer.get_rollout())
+
+            # Update Networks
+
+            for i in range(update_epochs):
+                for start in range(0, batch_size, minibatch_size):
+                    end = start + minibatch_size
+                    # Normalize advantages
+                    adv_mb = adv_j[start:end]
+                    adv_mb = (adv_mb - adv_mb.mean()) / (adv_mb.std() + 1e-8)
+
+                    (p_grad, v_grad), info = ppo_loss_grad_vmap(
+                        p_params,
+                        v_params,
+                        s_j[start:end],
+                        a_j[start:end],
+                        lp_j[start:end],
+                        r_j[start:end],
+                        adv_mb,
+                    )
+
+                    p_params, p_opt_state = optim_update_step(p_params, p_grad, p_opt_state)
+                    v_params, v_opt_state = optim_update_step(v_params, v_grad, v_opt_state)
+
+            # Logging
+            et = time.time()
+            info_mean = jax.tree_map(lambda x: x.mean(axis=0), info)
+            # if len(ep_rws):
+            #     info_mean.update(
+            #         dict(
+            #             ep_rw_mean=sum(ep_rws)
+            #             / len(ep_rws)
+            #             # rw=sum(r_v),
+            #             # mean_v=sum(v_v) / steps,
+            #             # steps_s=steps / (et - st),
+            #             # mean_return=sum(returns) / steps,
+            #             # mean_adv=adv_j.mean(),
+            #             # logstd_param=p_params["params"]["logstd"],
+            #         )
+            #     )
+            wandb.log(
                 dict(
-                    ep_rw_mean=sum(ep_rws)
-                    / len(ep_rws)
-                    # rw=sum(r_v),
-                    # mean_v=sum(v_v) / steps,
-                    # steps_s=steps / (et - st),
-                    # mean_return=sum(returns) / steps,
-                    # mean_adv=adv_j.mean(),
-                    # logstd_param=p_params["params"]["logstd"],
+                    global_steps=total_steps,
+                    episodic_return=np.mean(ep_rws),
+                    charts_learning_rate=learning_rate,
+                    losses_value_loss=info_mean["l_vf"],
+                    losses_policy_loss=info_mean["l_clip"],
+                    losses_entropy=info_mean["S"],
+                    losses_approx_kl=info['approx_kl'],
+                    # debug_pg_stop_iter=0,
                 )
             )
-        wandb.log(info_mean)
-        st = et
+            st = et
+            pbar.update(batch_size)
