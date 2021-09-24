@@ -19,7 +19,7 @@ import wandb
 
 def build_ppo_loss(policy_model, value_model, epsilon, c1, c2):
     def ppo_loss(
-        p_params, v_params, observation, action, logprob, target_value, advantage
+        p_params, v_params, observation, action, logprob, target_value, old_values, advantage
     ):
         mean, sigma = policy_model.apply(p_params, observation)
         dist = distrax.MultivariateNormalDiag(mean, sigma)
@@ -30,7 +30,10 @@ def build_ppo_loss(policy_model, value_model, epsilon, c1, c2):
         l_clip = jnp.fmin(p_loss1, p_loss2)
 
         value = value_model.apply(v_params, observation)
-        l_vf = jnp.square(value - target_value)
+        l_vf_1 = jnp.square(value - target_value)
+        v_clipped = old_values + jnp.clip(value - old_values, -epsilon, epsilon)
+        l_vf_2 = jnp.square(v_clipped - target_value)
+        l_vf = 0.5 * jnp.fmax(l_vf_1, l_vf_2)
 
         S = jnp.expand_dims(dist.entropy(), 0)
 
@@ -218,6 +221,7 @@ def get_calculate_gae_fn(v_model, gamma, gae_lambda, num_steps):
             jnp.array(logprobs),
             jnp.array(returns),
             jnp.array(advantages),
+            jnp.array(values[:-1]),
         )
 
     return gae_advantages
@@ -328,7 +332,7 @@ if __name__ == "__main__":
 
     ppo_loss = build_ppo_loss(p_model, v_model, epsilon, c1, c2)
     ppo_loss_grad = jax.jit(jax.grad(ppo_loss, argnums=[0, 1], has_aux=True))
-    ppo_loss_grad_vmap = jax.vmap(ppo_loss_grad, in_axes=(None, None, 0, 0, 0, 0, 0))
+    ppo_loss_grad_vmap = jax.vmap(ppo_loss_grad, in_axes=(None, None, 0, 0, 0, 0, 0, 0))
 
     optim = optax.chain(
         optax.clip_by_global_norm(max_grad_norm),
@@ -380,7 +384,7 @@ if __name__ == "__main__":
                     ep_rw = 0
 
             # Calculate Advantages
-            s_j, a_j, lp_j, r_j, adv_j = calculate_gae(v_params, buffer.get_rollout())
+            s_j, a_j, lp_j, r_j, adv_j, v_j = calculate_gae(v_params, buffer.get_rollout())
 
             # Update Networks
 
@@ -398,6 +402,7 @@ if __name__ == "__main__":
                         a_j[start:end],
                         lp_j[start:end],
                         r_j[start:end],
+                        v_j[start:end],
                         adv_mb,
                     )
 
