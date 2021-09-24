@@ -198,19 +198,20 @@ def optim_update_fcn(optim):
 
 
 def get_calculate_gae_fn(v_model, gamma, gae_lambda, num_steps):
-    get_v = jax.jit(v_model.apply)
-    get_v_vmap = jax.vmap(get_v, in_axes=(None, 0))
+    get_v = v_model.apply
+    get_v_vmap = jax.jit(jax.vmap(get_v, in_axes=(None, 0)))
 
     def gae_advantages(v_params, rollout):
-        observations, actions, logprobs, rewards, dones, next_observation = rollout
+        observations, actions, logprobs, rewards, dones, next_observations = rollout
         advantages = np.zeros_like(rewards)
         returns = np.zeros_like(rewards)
         values = get_v_vmap(
-            v_params, np.concatenate([observations, next_observation], axis=0)
+            v_params, observations
         )
+        next_values = get_v_vmap(v_params, next_observations)
         lastgaelam = 0
         for t in reversed(range(num_steps)):
-            delta = rewards[t] + gamma * values[t + 1] * (1 - dones[t]) - values[t]
+            delta = rewards[t] + gamma * next_values[t] * (1 - dones[t]) - values[t]
             advantages[t] = delta + gamma * gae_lambda * (1 - dones[t]) * lastgaelam
             lastgaelam = advantages[t]
             returns[t] = advantages[t] + values[t]
@@ -221,7 +222,7 @@ def get_calculate_gae_fn(v_model, gamma, gae_lambda, num_steps):
             jnp.array(logprobs),
             jnp.array(returns),
             jnp.array(advantages),
-            jnp.array(values[:-1]),
+            jnp.array(values),
         )
 
     return gae_advantages
@@ -253,7 +254,7 @@ class RolloutBuffer:
         self._logprobs = np.empty((capacity, 1), dtype=np.float32)
         self._rewards = np.empty((capacity, 1), dtype=np.float32)
         self._dones = np.empty((capacity, 1), dtype=np.float32)
-        self._next_observation = np.empty((1, *state_dim), dtype=np.float32)
+        self._next_observations = np.empty((capacity, *state_dim), dtype=np.float32)
 
     def add(self, observation, action, logprob, reward, done, next_observation):
         """Add a transition to the buffer."""
@@ -265,7 +266,7 @@ class RolloutBuffer:
         self._logprobs[self._num_added] = logprob
         self._rewards[self._num_added] = reward
         self._dones[self._num_added] = done
-        self._next_observation[0] = next_observation
+        self._next_observations[self._num_added] = next_observation
 
         self._num_added += 1
 
@@ -280,7 +281,7 @@ class RolloutBuffer:
             self._logprobs,
             self._rewards,
             self._dones,
-            self._next_observation,
+            self._next_observations,
         )
 
     def clear(self):
@@ -376,7 +377,7 @@ if __name__ == "__main__":
                 next_obs, reward, done, env_info = env.step(np.array(a))
                 ep_rw += env_info['real_reward']
 
-                buffer.add(obs, a, logprob, reward, done, next_obs)
+                buffer.add(obs, a, logprob, reward, False if not done or "TimeLimit.truncated" in env_info else True, next_obs)
 
                 if done:
                     next_obs = env.reset()
