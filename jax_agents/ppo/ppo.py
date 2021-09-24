@@ -87,6 +87,102 @@ class Value(nn.Module):
         return x
 
 
+class RunningMeanStd(object):
+    def __init__(self, epsilon=1e-4, shape=()):
+        self.mean = np.zeros(shape, "float64")
+        self.var = np.ones(shape, "float64")
+        self.count = epsilon
+
+    def update(self, x):
+        batch_mean = np.mean([x], axis=0)
+        batch_var = np.var([x], axis=0)
+        batch_count = 1
+        self.update_from_moments(batch_mean, batch_var, batch_count)
+
+    def update_from_moments(self, batch_mean, batch_var, batch_count):
+        self.mean, self.var, self.count = update_mean_var_count_from_moments(
+            self.mean, self.var, self.count, batch_mean, batch_var, batch_count
+        )
+
+
+def update_mean_var_count_from_moments(
+    mean, var, count, batch_mean, batch_var, batch_count
+):
+    delta = batch_mean - mean
+    tot_count = count + batch_count
+
+    new_mean = mean + delta * batch_count / tot_count
+    m_a = var * count
+    m_b = batch_var * batch_count
+    M2 = m_a + m_b + np.square(delta) * count * batch_count / tot_count
+    new_var = M2 / tot_count
+    new_count = tot_count
+
+    return new_mean, new_var, new_count
+
+
+class NormalizedEnv(gym.core.Wrapper):
+    def __init__(
+        self,
+        env,
+        ob=True,
+        ret=True,
+        clipob=10.0,
+        cliprew=10.0,
+        gamma=0.99,
+        epsilon=1e-8,
+    ):
+        super(NormalizedEnv, self).__init__(env)
+        self.ob_rms = RunningMeanStd(shape=self.observation_space.shape) if ob else None
+        self.ret_rms = RunningMeanStd(shape=(1,)) if ret else None
+        self.clipob = clipob
+        self.cliprew = cliprew
+        self.ret = np.zeros(())
+        self.gamma = gamma
+        self.epsilon = epsilon
+
+    def step(self, action):
+        obs, rews, dones, infos = self.env.step(action)
+        infos["real_reward"] = rews
+        self.ret = self.ret * self.gamma + rews
+        obs = self._obfilt(obs)
+        if self.ret_rms:
+            self.ret_rms.update(np.array([self.ret].copy()))
+            rews = np.clip(
+                rews / np.sqrt(self.ret_rms.var + self.epsilon),
+                -self.cliprew,
+                self.cliprew,
+            )
+        self.ret = self.ret * (1 - float(dones))
+        return obs, rews, dones, infos
+
+    def _obfilt(self, obs):
+        if self.ob_rms:
+            self.ob_rms.update(obs)
+            obs = np.clip(
+                (obs - self.ob_rms.mean) / np.sqrt(self.ob_rms.var + self.epsilon),
+                -self.clipob,
+                self.clipob,
+            )
+            return obs
+        else:
+            return obs
+
+    def reset(self):
+        self.ret = np.zeros(())
+        obs = self.env.reset()
+        return self._obfilt(obs)
+
+
+class ClipActionsWrapper(gym.Wrapper):
+    def step(self, action):
+        import numpy as np
+
+        action = np.nan_to_num(action)
+        action = np.clip(action, self.action_space.low, self.action_space.high)
+        return self.env.step(action)
+
+
 def optim_update_fcn(optim):
     @jax.jit
     def update_step(params, grads, opt_state):
@@ -194,9 +290,9 @@ class RolloutBuffer:
 
 if __name__ == "__main__":
     env = gym.make("HopperBulletEnv-v0")
-    wandb.init(project="rl-jax", entity="felipemartins", monitor_gym=True, save_code=True)
-    env = gym.wrappers.RecordVideo(env, "./monitor/")
-    env.seed(0)
+    env = ClipActionsWrapper(env)
+    env = gym.wrappers.RecordVideo(env, "./monitor/", step_trigger=lambda x: x % 25000 == 0)
+    env = NormalizedEnv(env)
     wandb.init(
         project="rl-jax", entity="felipemartins", monitor_gym=True, save_code=True
     )
@@ -272,13 +368,9 @@ if __name__ == "__main__":
 
                 rng, a_key = jax.random.split(rng, 2)
                 a, logprob = sample_action(a_key, p_params, obs)
-                # Scaling to environment, assumes env action_space is simmetric around 0
-                clipped_a = np.clip(
-                    a * env.action_space.high, env.action_space.low, env.action_space.high
-                )
 
-                next_obs, reward, done, info = env.step(np.array(clipped_a))
-                ep_rw += reward
+                next_obs, reward, done, env_info = env.step(np.array(a))
+                ep_rw += env_info['real_reward']
 
                 buffer.add(obs, a, logprob, reward, done, next_obs)
 
@@ -313,6 +405,8 @@ if __name__ == "__main__":
                     v_params, v_opt_state = optim_update_step(v_params, v_grad, v_opt_state)
 
             # Logging
+            pbar.update(num_steps)
+
             et = time.time()
             info_mean = jax.tree_map(lambda x: x.mean(axis=0), info)
             # if len(ep_rws):
@@ -336,9 +430,8 @@ if __name__ == "__main__":
                     losses_value_loss=info_mean["l_vf"],
                     losses_policy_loss=info_mean["l_clip"],
                     losses_entropy=info_mean["S"],
-                    losses_approx_kl=info['approx_kl'],
+                    losses_approx_kl=info_mean['approx_kl'],
                     # debug_pg_stop_iter=0,
                 )
             )
             st = et
-            pbar.update(batch_size)
