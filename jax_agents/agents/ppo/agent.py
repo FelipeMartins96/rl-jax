@@ -2,8 +2,11 @@ from jax_agents.agents.ppo.hyperparameters import HyperparametersPPO
 
 
 class AgentPPO:
-    def __init__(self):
-        pass
+    def __init__(self, hyperparameters):
+        # Tests
+        assert isinstance(hyperparameters, HyperparametersPPO)
+
+        self.hp = hyperparameters
 
     def observe(self):
         pass
