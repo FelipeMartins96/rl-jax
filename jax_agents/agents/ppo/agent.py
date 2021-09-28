@@ -1,4 +1,7 @@
 from jax_agents.agents.ppo.hyperparameters import HyperparametersPPO
+from jax_agents.agents.ppo.buffer import RolloutBuffer
+
+import gym
 
 
 class AgentPPO:
@@ -7,9 +10,18 @@ class AgentPPO:
         assert isinstance(hyperparameters, HyperparametersPPO)
 
         self.hp = hyperparameters
+        env = gym.make(self.hp.environment_name)
+        self.buffer = RolloutBuffer(
+            env.observation_space, env.action_space, self.hp.rollout_steps
+        )
 
-    def observe(self):
-        pass
+    def observe(
+        self, observation, action, action_logprob, reward, done, next_observation
+    ):
+        "Observe an environment transition, adding it to the rollout buffer"
+        self.buffer.add(
+            observation, action, action_logprob, reward, done, next_observation
+        )
 
     def update(self):
         pass
