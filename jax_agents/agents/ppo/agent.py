@@ -24,7 +24,16 @@ class AgentPPO:
         )
 
     def update(self):
-        pass
+        rollout = get_rollout()
+        gaes = calculate_gae(rollout)
+        batch = shuffle_gaes(gaes)
+
+        for i in range(update_epochs):
+            for j in range(n_minibatches):
+                grads, info = ppo_grad(minibatch)
+                update_grads(grads)
+        
+        return info
 
     def sample_action(self):
         pass
