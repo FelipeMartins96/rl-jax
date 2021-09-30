@@ -63,6 +63,7 @@ class AgentPPO:
 
         # Jitting
         self.batch_ppo_loss_grad = jax.jit(self.batch_ppo_loss_grad)
+        self.policy_fn = jax.jit(self.policy_model.apply, backend='cpu')
 
     def observe(
         self, observation, action, action_logprob, reward, done, next_observation
@@ -73,6 +74,9 @@ class AgentPPO:
         )
 
     def update(self):
+        if self.buffer.size < self.hp.n_rollout_steps:
+            return None
+
         rollout = self.buffer.get_rollout()
         gae_rollout = self.calculate_gae(self.value_params, rollout)
 
@@ -87,7 +91,7 @@ class AgentPPO:
             b_advantages,
             b_values,
         ) = gae_rollout
-
+        
         for epoch in range(self.hp.update_epochs):
             np.random.shuffle(indexes)
             for mb_start in range(0, self.hp.n_rollout_steps, minibatch_size):
@@ -120,12 +124,12 @@ class AgentPPO:
         return info
 
     def sample_action(self, observation):
-        mean, sigma = self.policy_model.apply(self.policy_params, observation)
+        mean, sigma = self.policy_fn(self.policy_params, observation)
         distribution = distrax.MultivariateNormalDiag(mean, sigma)
         action = distribution.sample(seed=jax.random.PRNGKey(0))
         logprob = distribution.log_prob(action)
 
-        return action, logprob
+        return np.array(action), np.array(logprob)
 
     @staticmethod
     def get_hyperparameters():
