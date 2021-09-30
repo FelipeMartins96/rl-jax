@@ -2,6 +2,7 @@ import gym
 import jax
 import numpy as np
 import optax
+import distrax
 from jax_agents.agents.ppo.buffer import RolloutBuffer
 from jax_agents.agents.ppo.generalized_advantage_estimate import get_calculate_gae_fn
 from jax_agents.agents.ppo.hyperparameters import HyperparametersPPO
@@ -25,12 +26,12 @@ class AgentPPO:
         )
 
         # Networks
-        policy_model = PolicyModule(env.action_space.shape[0])
-        value_model = ValueModule()
-        self.policy_params = policy_model.init(
+        self.policy_model = PolicyModule(env.action_space.shape[0])
+        self.value_model = ValueModule()
+        self.policy_params = self.policy_model.init(
             jax.random.PRNGKey(0), env.observation_space.sample()
         )
-        self.value_params = value_model.init(
+        self.value_params = self.value_model.init(
             jax.random.PRNGKey(0), env.observation_space.sample()
         )
 
@@ -46,11 +47,11 @@ class AgentPPO:
 
         # Get functions
         self.calculate_gae = get_calculate_gae_fn(
-            value_model, self.hp.gamma, self.hp.gae_lambda, self.hp.n_rollout_steps
+            self.value_model, self.hp.gamma, self.hp.gae_lambda, self.hp.n_rollout_steps
         )
         ppo_loss = get_ppo_loss_fn(
-            policy_model,
-            value_model,
+            self.policy_model,
+            self.value_model,
             self.hp.clip_coefficient,
             self.hp.value_loss_coefficient,
             self.hp.entropy_loss_coefficient,
@@ -118,8 +119,13 @@ class AgentPPO:
 
         return info
 
-    def sample_action(self):
-        pass
+    def sample_action(self, observation):
+        mean, sigma = self.policy_model.apply(self.policy_params, observation)
+        distribution = distrax.MultivariateNormalDiag(mean, sigma)
+        action = distribution.sample(seed=jax.random.PRNGKey(0))
+        logprob = distribution.log_prob(action)
+
+        return action, logprob
 
     @staticmethod
     def get_hyperparameters():
