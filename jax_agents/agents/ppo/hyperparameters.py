@@ -4,7 +4,7 @@ from dataclasses import dataclass
 @dataclass
 class HyperparametersPPO:
     algorithm_name: str = "Proximal Policy Optimization"
-    environment_name: str = "HopperBulletEnv-v0"
+    environment_name: str = "Pendulum-v0"
     total_training_steps: int = int(2e6)
     n_rollout_steps: int = 2048
     update_epochs: int = 10
@@ -17,3 +17,4 @@ class HyperparametersPPO:
     clip_coefficient: float = 0.2
     entropy_loss_coefficient: float = 0.0
     value_loss_coefficient: float = 0.5
+    seed: int = 0

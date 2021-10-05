@@ -6,18 +6,17 @@ import jax
 import wandb
 import pybullet_envs
 
-# jax.config.update("jax_platform_name", "cpu")
-jax.config.update("jax_debug_nans", True)  # break on nans
+jax.config.update("jax_platform_name", "cpu")
+# jax.config.update("jax_debug_nans", True)  # break on nans
 
 
 hp = AgentPPO.get_hyperparameters()
 env = gym.make(hp.environment_name)
 env = gym.wrappers.RecordVideo(env, "./monitor/", step_trigger=lambda x: x % 25000 == 0)
-np.random.seed(1)
-env.seed(1)
-env.action_space.seed(1)
-env.observation_space.seed(1)
-rng = jax.random.PRNGKey(1)
+np.random.seed(hp.seed)
+env.seed(hp.seed)
+env.action_space.seed(hp.seed)
+env.observation_space.seed(hp.seed)
 
 agent = AgentPPO(hp)
 

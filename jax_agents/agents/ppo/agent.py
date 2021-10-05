@@ -18,6 +18,8 @@ class AgentPPO:
     def __init__(self, hyperparameters):
         # Tests
         assert isinstance(hyperparameters, HyperparametersPPO)
+        self.rng = jax.random.PRNGKey(hyperparameters.seed)
+        self.rng, policy_key, value_key = jax.random.split(self.rng, 3)
 
         self.hp = hyperparameters
         env = gym.make(self.hp.environment_name)
@@ -29,10 +31,10 @@ class AgentPPO:
         self.policy_model = PolicyModule(env.action_space.shape[0])
         self.value_model = ValueModule()
         self.policy_params = self.policy_model.init(
-            jax.random.PRNGKey(0), env.observation_space.sample()
+            policy_key, env.observation_space.sample()
         )
         self.value_params = self.value_model.init(
-            jax.random.PRNGKey(0), env.observation_space.sample()
+            value_key, env.observation_space.sample()
         )
 
         # Optimizers
@@ -125,9 +127,10 @@ class AgentPPO:
         return info
 
     def sample_action(self, observation):
+        self.rng, act_key = jax.random.split(self.rng, 2)
         mean, sigma = self.policy_fn(self.policy_params, observation)
         distribution = distrax.MultivariateNormalDiag(mean, sigma)
-        action = distribution.sample(seed=jax.random.PRNGKey(0))
+        action = distribution.sample(seed=act_key)
         logprob = distribution.log_prob(action)
 
         return np.array(action), np.array(logprob)
