@@ -4,15 +4,31 @@ from tqdm import tqdm
 import numpy as np
 import jax
 import wandb
+import pybullet_envs
 
-jax.config.update('jax_platform_name', 'cpu')
+# jax.config.update("jax_platform_name", "cpu")
+jax.config.update("jax_debug_nans", True)  # break on nans
 
 
 hp = AgentPPO.get_hyperparameters()
-agent = AgentPPO(hp)
 env = gym.make(hp.environment_name)
+env = gym.wrappers.RecordVideo(env, "./monitor/", step_trigger=lambda x: x % 25000 == 0)
+np.random.seed(1)
+env.seed(1)
+env.action_space.seed(1)
+env.observation_space.seed(1)
+rng = jax.random.PRNGKey(1)
 
-wandb.init(project="rl-jax", entity="felipemartins")
+agent = AgentPPO(hp)
+
+wandb.init(
+    project="ppo",
+    entity="felipemartins",
+    monitor_gym=True,
+    save_code=True,
+    name="agent",
+)
+
 
 obs = env.reset()
 ep_rw = 0
@@ -34,7 +50,7 @@ for step in tqdm(range(hp.total_training_steps), smoothing=0):
                 losses_value_loss=info_mean["l_vf"],
                 losses_policy_loss=info_mean["l_clip"],
                 losses_entropy=info_mean["S"],
-                losses_approx_kl=info_mean['approx_kl'],
+                losses_approx_kl=info_mean["approx_kl"],
             )
         )
         ep_rws = []
@@ -45,4 +61,3 @@ for step in tqdm(range(hp.total_training_steps), smoothing=0):
         ep_rw = 0
     else:
         obs = _obs
-

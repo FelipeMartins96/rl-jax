@@ -4,8 +4,8 @@ from dataclasses import dataclass
 @dataclass
 class HyperparametersPPO:
     algorithm_name: str = "Proximal Policy Optimization"
-    environment_name: str = "Pendulum-v0"
-    total_training_steps: int = int(1e6)
+    environment_name: str = "HopperBulletEnv-v0"
+    total_training_steps: int = int(2e6)
     n_rollout_steps: int = 2048
     update_epochs: int = 10
     n_mini_batches: int = 32

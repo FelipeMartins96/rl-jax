@@ -63,7 +63,8 @@ class AgentPPO:
 
         # Jitting
         self.batch_ppo_loss_grad = jax.jit(self.batch_ppo_loss_grad)
-        self.policy_fn = jax.jit(self.policy_model.apply, backend='cpu')
+        self.policy_fn = jax.jit(self.policy_model.apply, backend="cpu")
+        self.optimizer_step = jax.jit(self.optimizer_step)
 
     def observe(
         self, observation, action, action_logprob, reward, done, next_observation
@@ -91,7 +92,7 @@ class AgentPPO:
             b_advantages,
             b_values,
         ) = gae_rollout
-        
+
         for epoch in range(self.hp.update_epochs):
             np.random.shuffle(indexes)
             for mb_start in range(0, self.hp.n_rollout_steps, minibatch_size):
@@ -110,8 +111,8 @@ class AgentPPO:
                     b_actions[mb_indexes],
                     b_logprobs[mb_indexes],
                     b_returns[mb_indexes],
-                    mb_advantages,
                     b_values[mb_indexes],
+                    mb_advantages,
                 )
 
                 self.policy_params, self.policy_optmizer_state = self.optimizer_step(
