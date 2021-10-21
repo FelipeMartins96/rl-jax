@@ -3,7 +3,7 @@ import jax
 import numpy as np
 import optax
 import distrax
-from jax_agents.agents.ddpg.buffer import RolloutBuffer
+from jax_agents.agents.ddpg.buffer import ReplayBuffer
 from jax_agents.agents.ddpg.generalized_advantage_estimate import get_calculate_gae_fn
 from jax_agents.agents.ddpg.hyperparameters import HyperparametersDDPG
 from jax_agents.agents.ddpg.loss import get_ppo_loss_fn
@@ -14,7 +14,7 @@ from jax_agents.agents.ddpg.networks import (
 )
 
 
-class AgentPPO:
+class AgentDDPG:
     def __init__(self, hyperparameters):
         # Tests
         assert isinstance(hyperparameters, HyperparametersDDPG)
