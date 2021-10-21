@@ -18,6 +18,7 @@ class AgentPPO:
     def __init__(self, hyperparameters):
         # Tests
         assert isinstance(hyperparameters, HyperparametersPPO)
+        
         self.rng = jax.random.PRNGKey(hyperparameters.seed)
         self.rng, policy_key, value_key = jax.random.split(self.rng, 3)
 

@@ -32,6 +32,7 @@ class ValueModule(nn.Module):
 
 
 def get_optimizer_step_fn(optim):
+    # return function to update the parameters from a batch of gradients
     def update_step(params, grads, opt_state):
         mean_grads = jax.tree_map(lambda x: x.mean(axis=0), grads)
         mean_grads, opt_state = optim.update(mean_grads, opt_state)
