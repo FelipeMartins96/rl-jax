@@ -6,7 +6,7 @@ import optax
 from jax_agents.agents.ppo.networks import get_optimizer_step_fn
 from jax_agents.agents.ddpg.buffer import ReplayBuffer
 from jax_agents.agents.ddpg.hyperparameters import HyperparametersDDPG
-from jax_agents.agents.ddpg.loss import get_ppo_loss_fn
+from jax_agents.agents.ddpg.loss import get_policy_loss_fn, get_q_value_loss_fn
 from jax_agents.agents.ddpg.networks import (
     PolicyModule,
     QValueModule,
@@ -50,17 +50,19 @@ class AgentDDPG:
 
         # Get functions
         self.optimizer_step = get_optimizer_step_fn(optimizer)
-        policy_loss = get_policy_loss_fn()
-        q_value_loss = get_q_value_loss_fn()
+        policy_loss = get_policy_loss_fn(
+            policy=self.policy_model, q_value=self.q_value_model
+        )
+        q_value_loss = get_q_value_loss_fn(
+            policy=self.policy_model, q_value=self.q_value_model, gamma=self.hp.gamma
+        )
         policy_loss_grad = jax.grad(policy_loss, has_aux=True)
         q_value_loss_grad = jax.grad(q_value_loss, has_aux=True)
         self.batch_policy_loss_grad = jax.vmap(
-            policy_loss_grad,
-            in_axes=(None, 0, 0, 0, 0, 0, 0),  # TODO: defines batch args
+            policy_loss_grad, in_axes=(None, None, 0)
         )
         self.batch_q_value_loss_grad = jax.vmap(
-            q_value_loss_grad,
-            in_axes=(None, 0, 0, 0, 0, 0, 0),  # TODO: defines batch args
+            q_value_loss_grad, in_axes=(None, None, None, 0, 0, 0, 0, 0)
         )
 
         # Jitting
@@ -80,6 +82,7 @@ class AgentDDPG:
         if self.buffer.size < self.hp.min_replay_size:
             return None
 
+        info = dict()
         (
             b_observations,
             b_actions,
@@ -88,14 +91,19 @@ class AgentDDPG:
             b_next_observations,
         ) = self.buffer.get_batch(self.hp.batch_size)
 
-        (
-            b_policy_grads,
-            info_policy,
-        ) = self.batch_policy_loss_grad()  # TODO: function params
-        (
-            b_q_value_grads,
-            info_q_value,
-        ) = self.batch_q_value_loss_grad()  # TODO: function params
+        (b_policy_grads, info_policy,) = self.batch_policy_loss_grad(
+            self.policy_params, self.q_value_params, b_observations
+        )
+        (b_q_value_grads, info_q_value,) = self.batch_q_value_loss_grad(
+            self.q_value_params,
+            self.taget_policy_params,
+            self.target_q_value_params,
+            b_observations,
+            b_actions,
+            b_rewards,
+            b_dones,
+            b_next_observations,
+        )
 
         self.policy_params, self.policy_optmizer_state = self.optimizer_step(
             self.policy_params, b_policy_grads, self.policy_optmizer_state
@@ -111,12 +119,15 @@ class AgentDDPG:
             self.q_value_params, self.target_q_value_params
         )
 
-        return info_policy, info_q_value
+        info.update(info_q_value)
+        info.update(info_policy)
+        return info
 
     def sample_action(self, observation):
         self.rng, act_key = jax.random.split(self.rng, 2)
         action = self.policy_fn(self.policy_params, observation)
         action = np.random.normal(action, self.hp.noise_sigma)
+        # TODO: clip actions
         return np.array(action), 0.0
 
     @staticmethod
