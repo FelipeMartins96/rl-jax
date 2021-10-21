@@ -1,16 +1,16 @@
+import distrax
 import gym
 import jax
 import numpy as np
 import optax
-import distrax
+from jax_agents.agents.ppo.networks import get_optimizer_step_fn
 from jax_agents.agents.ddpg.buffer import ReplayBuffer
-from jax_agents.agents.ddpg.generalized_advantage_estimate import get_calculate_gae_fn
 from jax_agents.agents.ddpg.hyperparameters import HyperparametersDDPG
 from jax_agents.agents.ddpg.loss import get_ppo_loss_fn
 from jax_agents.agents.ddpg.networks import (
     PolicyModule,
-    ValueModule,
-    get_optimizer_step_fn,
+    QValueModule,
+    target_params_sync,
 )
 
 
@@ -50,7 +50,6 @@ class AgentDDPG:
 
         # Get functions
         self.optimizer_step = get_optimizer_step_fn(optimizer)
-        self.target_params_update = get_target_params_update_fn()
         policy_loss = get_policy_loss_fn()
         q_value_loss = get_q_value_loss_fn()
         policy_loss_grad = jax.grad(policy_loss, has_aux=True)
@@ -69,6 +68,7 @@ class AgentDDPG:
         self.batch_q_value_loss_grad = jax.jit(self.batch_q_value_loss_grad)
         self.policy_fn = jax.jit(self.policy_model.apply, backend="cpu")
         self.optimizer_step = jax.jit(self.optimizer_step)
+        self.target_params_update = jax.jit(target_params_sync)
 
     def observe(
         self, observation, action, action_logprob, reward, done, next_observation
@@ -88,8 +88,14 @@ class AgentDDPG:
             b_next_observations,
         ) = self.buffer.get_batch(self.hp.batch_size)
 
-        b_policy_grads, info_policy = self.batch_policy_loss_grad() # TODO: function params 
-        b_q_value_grads, info_q_value = self.batch_q_value_loss_grad() # TODO: function params
+        (
+            b_policy_grads,
+            info_policy,
+        ) = self.batch_policy_loss_grad()  # TODO: function params
+        (
+            b_q_value_grads,
+            info_q_value,
+        ) = self.batch_q_value_loss_grad()  # TODO: function params
 
         self.policy_params, self.policy_optmizer_state = self.optimizer_step(
             self.policy_params, b_policy_grads, self.policy_optmizer_state
