@@ -47,7 +47,7 @@ class ReplayBuffer:
 
     def get_batch(self, batch_size):
         """Sample a batch of transitions uniformly."""
-        assert self.size > batch_size
+        assert self.size >= batch_size
 
         batch_indices = np.random.randint(0, self.size, size=batch_size)
 

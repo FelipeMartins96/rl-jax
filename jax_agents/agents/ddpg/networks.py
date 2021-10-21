@@ -1,3 +1,4 @@
+import jax
 import flax.linen as nn
 import jax.numpy as jnp
 from jax.nn.initializers import uniform, lecun_uniform
@@ -60,11 +61,11 @@ class QValueModule(nn.Module):
         return x
 
 
-def target_params_sync_fn(state, tgt_state, tau):
+def target_params_sync_fn(params, tgt_params, tau):
     """Soft target network update."""
 
     new_target_params = jax.tree_multimap(
-        lambda p, tp: p * tau + tp * (1 - tau), state.params, tgt_state.params
+        lambda p, tp: p * tau + tp * (1 - tau), params, tgt_params
     )
 
-    return tgt_state.replace(params=new_target_params)
+    return new_target_params

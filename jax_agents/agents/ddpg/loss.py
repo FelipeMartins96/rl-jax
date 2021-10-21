@@ -3,7 +3,7 @@ import jax.numpy as jnp
 
 def get_policy_loss_fn(policy, q_value):
     def policy_loss(policy_params, q_value_params, observation):
-        new_action = policy.apply(policy_params, q_value_params, observation)
+        new_action = policy.apply(policy_params, observation)
         new_q = q_value.apply(q_value_params, observation, new_action)
         loss = -new_q
         return loss.squeeze(), {"agent/policy_loss": loss}
