@@ -3,21 +3,21 @@ import gym
 import jax
 import numpy as np
 import optax
+from jax_agents.agents.sac.hyperparameters import HyperparametersSAC
 from jax_agents.agents.ppo.networks import get_optimizer_step_fn
 from jax_agents.agents.ddpg.buffer import ReplayBuffer
-from jax_agents.agents.sac.hyperparameters import HyperparametersSAC
-from jax_agents.agents.ddpg.loss import get_policy_loss_fn, get_q_value_loss_fn
-from jax_agents.agents.ddpg.networks import (
+from jax_agents.agents.ddpg.networks import target_params_sync_fn
+from jax_agents.agents.sac.networks import (
     PolicyModule,
-    QValueModule,
-    target_params_sync_fn,
+    DoubleQValueModule,
+    ValueModule,
 )
 
 
-class AgentDDPG:
+class AgentSAC:
     def __init__(self, hyperparameters):
         # Tests
-        assert isinstance(hyperparameters, HyperparametersDDPG)
+        assert isinstance(hyperparameters, HyperparametersSAC)
 
         self.rng = jax.random.PRNGKey(hyperparameters.seed)
         self.rng, policy_key, value_key, q_value_key = jax.random.split(self.rng, 4)
@@ -53,7 +53,7 @@ class AgentDDPG:
         self.value_optimizer_state = optimizer.init(self.value_params)
 
         # Get functions
-        # self.optimizer_step = get_optimizer_step_fn(optimizer)
+        self.optimizer_step = get_optimizer_step_fn(optimizer)
         # policy_loss = get_policy_loss_fn(
         #     policy=self.policy_model, q_value=self.q_value_model
         # )
@@ -74,7 +74,7 @@ class AgentDDPG:
         # self.batch_q_value_loss_grad = jax.jit(self.batch_q_value_loss_grad)
         # self.policy_fn = jax.jit(self.policy_model.apply, backend="cpu")
         # self.optimizer_step = jax.jit(self.optimizer_step)
-        # self.target_params_update = jax.jit(target_params_sync_fn)
+        self.target_params_update = jax.jit(target_params_sync_fn)
 
     def observe(
         self, observation, action, action_logprob, reward, done, next_observation
