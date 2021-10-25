@@ -7,23 +7,20 @@ class PolicyModule(nn.Module):
     "SAC Paper Actor Network"
     actions_dim: int
 
-    def setup(self):
-        self.fc1 = nn.Dense(256)
-        self.fc2 = nn.Dense(256)
-        self.fc_mean = nn.Dense(self.actions_dim)
-        self.fc_logstd = nn.Dense(self.actions_dim)
+    @nn.compact
+    def __call__(self, o):
+        x = nn.Dense(256)(o)
+        x = nn.relu(x)
+        x = nn.Dense(256)(x)
+        x = nn.relu(x)
 
-    def __call__(self, x):
-        x = nn.relu(self.fc1(x))
-        x = nn.relu(self.fc2(x))
-
-        mean = self.fc_mean(x)
-        log_std = self.fc_logstd(x)
+        mean = nn.Dense(self.actions_dim)(x)
+        log_std = nn.Dense(self.actions_dim)(x)
 
         return mean, log_std
 
-    def evaluate(self, x, rng, epsilon=1e-6):
-        mean, log_std = self(x)
+    def evaluate(self, o, rng, epsilon=1e-6):
+        mean, log_std = self(o)
         std = jnp.exp(log_std)
 
         normal = distrax.Normal(mean, std)
@@ -33,8 +30,8 @@ class PolicyModule(nn.Module):
 
         return action, log_prob, z, mean, log_std
 
-    def get_action(self, x, rng):
-        mean, log_std = self(x)
+    def get_action(self, o, rng):
+        mean, log_std = self(o)
         std = jnp.exp(log_std)
 
         normal = distrax.Normal(mean, std)
@@ -47,38 +44,27 @@ class PolicyModule(nn.Module):
 class QValueModule(nn.Module):
     "SAC Paper Critic Network"
 
-    def setup(self):
-        self.fc1 = nn.Dense(256)
-        self.fc2 = nn.Dense(256)
-        self.fc3 = nn.Dense(1)
+    @nn.compact
+    def __call__(self, o, a):
+        x = jnp.concatenate([o, a], axis=-1)
+        x = nn.Dense(256)(x)
+        x = nn.relu(x)
+        x = nn.Dense(256)(x)
+        x = nn.relu(x)
+        x = nn.Dense(1)(x)
 
-    def __call__(self, s, a):
-        x = jnp.concatenate([s, a], axis=-1)
-        x = nn.relu(self.fc1(x))
-        x = nn.relu(self.fc2(x))
-        return self.fc3(x)
-
-
-class DoubleQValueModule(nn.Module):
-    "SAC Paper Critic Network"
-
-    def setup(self):
-        self.critic_1 = QValueModule()
-        self.critic_2 = QValueModule()
-
-    def __call__(self, s, a):
-        return self.critic_1(s, a), self.critic_2(s, a)
+        return x
 
 
 class ValueModule(nn.Module):
     "SAC Paper Value Network"
 
-    def setup(self):
-        self.fc1 = nn.Dense(256)
-        self.fc2 = nn.Dense(256)
-        self.fc3 = nn.Dense(1)
+    @nn.compact
+    def __call__(self, o):
+        x = nn.Dense(256)(o)
+        x = nn.relu(x)
+        x = nn.Dense(256)(x)
+        x = nn.relu(x)
+        x = nn.Dense(1)(x)
 
-    def __call__(self, x):
-        x = nn.relu(self.fc1(x))
-        x = nn.relu(self.fc2(x))
-        return self.fc3(x)
+        return x
