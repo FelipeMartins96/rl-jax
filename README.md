@@ -18,9 +18,13 @@ pip install -e .
 
 # Implemented Agents
 - DDPG
+- SAC
 - PPO
 
 # Changelog
+
+0.0.3:
+- [#4](https://github.com/FelipeMartins96/rl-jax/pull/3) - Added [Soft Actor Critic](https://arxiv.orgbs/1801.01290) agent.
 
 0.0.2:
 - [#5](https://github.com/FelipeMartins96/rl-jax/pull/5), [#6](https://github.com/FelipeMartins96/rl-jax/pull/6) - [Proximal Policy Optimization](https://arxiv.org/abs/1707.06347) Agent, with code level optimizations based on [costa.sh](https://costa.sh/blog-the-32-implementation-details-of-ppo.html) blog post.
