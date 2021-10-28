@@ -28,7 +28,7 @@ class PolicyModule(nn.Module):
         action = nn.tanh(z)
         log_prob = normal.log_prob(z) - jnp.log(1 - jnp.power(action, 2) + epsilon)
 
-        return action, log_prob, z, mean, log_std
+        return action, log_prob.sum(), z, mean, log_std
 
     def get_action(self, o, rng):
         mean, log_std = self(o)
