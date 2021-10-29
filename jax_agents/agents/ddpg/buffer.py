@@ -34,16 +34,14 @@ class ReplayBuffer:
 
     def add(self, observation, action, logprob, reward, done, next_observation):
         """Add a transition to the buffer."""
-        assert self._num_added < self._capacity
-        # TODO: Assert if transitions ranks are consistent
-
-        self._observations[self._num_added] = observation
-        self._actions[self._num_added] = action
-        self._rewards[self._num_added] = reward
-        self._dones[self._num_added] = done
-        self._next_observations[self._num_added] = next_observation
+        self._observations[self._index] = observation
+        self._actions[self._index] = action
+        self._rewards[self._index] = reward
+        self._dones[self._index] = done
+        self._next_observations[self._index] = next_observation
 
         self._num_added += 1
+        self._index = self._num_added % self._capacity
 
     def get_batch(self, batch_size):
         """Sample a batch of transitions uniformly."""
