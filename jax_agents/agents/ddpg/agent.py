@@ -10,6 +10,7 @@ from jax_agents.agents.ddpg.loss import get_policy_loss_fn, get_q_value_loss_fn
 from jax_agents.agents.ddpg.networks import (
     PolicyModule,
     QValueModule,
+    DoubleQValueModule,
     target_params_sync_fn,
 )
 
@@ -30,7 +31,10 @@ class AgentDDPG:
 
         # Networks
         self.policy_model = PolicyModule(env.action_space.shape[0])
-        self.q_value_model = QValueModule()
+
+        self.q_value_model = (
+            DoubleQValueModule() if self.hp.double_q else QValueModule()
+        )
         self.policy_params = self.policy_model.init(
             policy_key, env.observation_space.sample()
         )
