@@ -7,7 +7,10 @@ from jax_agents.agents.ppo.networks import get_optimizer_step_fn
 from jax_agents.agents.ddpg.buffer import ReplayBuffer
 from jax_agents.agents.ddpg.hyperparameters import HyperparametersDDPG
 from jax_agents.agents.ddpg.loss import get_policy_loss_fn, get_q_value_loss_fn
-from jax_agents.agents.ddpg.noise import get_gaussian_noise_fn
+from jax_agents.agents.ddpg.noise import (
+    get_gaussian_noise_fn,
+    get_ornstein_uhlenbeck_noise_fn,
+)
 from jax_agents.agents.ddpg.networks import (
     PolicyModule,
     QValueModule,
@@ -74,7 +77,18 @@ class AgentDDPG:
         self.batch_q_value_loss_grad = jax.vmap(
             q_value_loss_grad, in_axes=(None, None, None, 0, 0, 0, 0, 0)
         )
-        noise = get_gaussian_noise_fn(env.action_space, self.hp.noise_sigma)
+        if self.hp.use_ou_noise:
+            noise = get_ornstein_uhlenbeck_noise_fn(
+                env.action_space,
+                self.hp.ou_noise_sigma,
+                self.hp.ou_noise_theta,
+                self.hp.ou_noise_dt,
+            )
+        else:
+            noise = get_gaussian_noise_fn(env.action_space, self.hp.normal_noise_sigma)
+        self.noise_state = jax.numpy.zeros(
+            env.action_space.shape
+        )  # TODO: reseting noise and initial?
 
         # Jitting
         self.batch_policy_loss_grad = jax.jit(self.batch_policy_loss_grad)
@@ -143,8 +157,9 @@ class AgentDDPG:
     def sample_action(self, observation):
         self.rng, act_key = jax.random.split(self.rng, 2)
         action = self.policy_fn(self.policy_params, observation)
-        action = self.add_action_noise(act_key, action)
-        
+        action, self.noise_state = self.add_action_noise(
+            act_key, self.noise_state, action
+        )
         return np.array(action), 1.0
 
     @staticmethod
