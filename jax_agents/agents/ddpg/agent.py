@@ -51,10 +51,15 @@ class AgentDDPG:
         # Get functions
         self.optimizer_step = get_optimizer_step_fn(optimizer)
         policy_loss = get_policy_loss_fn(
-            policy=self.policy_model, q_value=self.q_value_model
+            policy=self.policy_model,
+            q_value=self.q_value_model,
+            is_double_q=self.hp.double_q,
         )
         q_value_loss = get_q_value_loss_fn(
-            policy=self.policy_model, q_value=self.q_value_model, gamma=self.hp.gamma
+            policy=self.policy_model,
+            q_value=self.q_value_model,
+            gamma=self.hp.gamma,
+            is_double_q=self.hp.double_q,
         )
         policy_loss_grad = jax.grad(policy_loss, has_aux=True)
         q_value_loss_grad = jax.grad(q_value_loss, has_aux=True)
