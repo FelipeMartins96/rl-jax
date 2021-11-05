@@ -61,6 +61,17 @@ class QValueModule(nn.Module):
         return x
 
 
+class DoubleQValueModule(nn.Module):
+    """Double Q Value (Critic) Network"""
+
+    @nn.compact
+    def __call__(self, o, a):
+        critic1 = QValueModule()(o, a)
+        critic2 = QValueModule()(o, a)
+
+        return critic1, critic2
+
+
 def target_params_sync_fn(params, tgt_params, tau):
     """Soft target network update."""
 

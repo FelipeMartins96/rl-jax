@@ -14,3 +14,4 @@ class HyperparametersDDPG:
     noise_sigma: float = 0.2
     tau: float = 1e-3
     seed: int = 0
+    double_q: bool = False

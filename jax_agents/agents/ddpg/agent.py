@@ -10,6 +10,7 @@ from jax_agents.agents.ddpg.loss import get_policy_loss_fn, get_q_value_loss_fn
 from jax_agents.agents.ddpg.networks import (
     PolicyModule,
     QValueModule,
+    DoubleQValueModule,
     target_params_sync_fn,
 )
 
@@ -30,7 +31,10 @@ class AgentDDPG:
 
         # Networks
         self.policy_model = PolicyModule(env.action_space.shape[0])
-        self.q_value_model = QValueModule()
+
+        self.q_value_model = (
+            DoubleQValueModule() if self.hp.double_q else QValueModule()
+        )
         self.policy_params = self.policy_model.init(
             policy_key, env.observation_space.sample()
         )
@@ -51,10 +55,15 @@ class AgentDDPG:
         # Get functions
         self.optimizer_step = get_optimizer_step_fn(optimizer)
         policy_loss = get_policy_loss_fn(
-            policy=self.policy_model, q_value=self.q_value_model
+            policy=self.policy_model,
+            q_value=self.q_value_model,
+            is_double_q=self.hp.double_q,
         )
         q_value_loss = get_q_value_loss_fn(
-            policy=self.policy_model, q_value=self.q_value_model, gamma=self.hp.gamma
+            policy=self.policy_model,
+            q_value=self.q_value_model,
+            gamma=self.hp.gamma,
+            is_double_q=self.hp.double_q,
         )
         policy_loss_grad = jax.grad(policy_loss, has_aux=True)
         q_value_loss_grad = jax.grad(q_value_loss, has_aux=True)
