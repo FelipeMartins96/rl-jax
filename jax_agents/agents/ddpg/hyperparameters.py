@@ -23,3 +23,7 @@ class HyperparametersDDPG:
     ou_noise_theta: float = 0.15
     ou_noise_sigma: float = 0.2
     ou_noise_dt: float = 1e-2
+
+    # Transitions and Gradient Ratios
+    n_gradients_per_update: int = 1
+    n_transitions_per_update: int = 1

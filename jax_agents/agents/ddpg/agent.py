@@ -98,6 +98,10 @@ class AgentDDPG:
         self.policy_fn = jax.jit(self.policy_model.apply, backend="cpu")
         self.add_action_noise = jax.jit(noise, backend="cpu")
 
+        # Counters
+        self.n_observed_transitions = 0
+        self.n_gradient_steps = 0
+
     def observe(
         self, observation, action, action_logprob, reward, done, next_observation
     ):
@@ -105,50 +109,58 @@ class AgentDDPG:
         self.buffer.add(
             observation, action, action_logprob, reward, done, next_observation
         )
+        self.n_observed_transitions += 1
 
     def update(self):
         if self.buffer.size < self.hp.min_replay_size:
             return None
+        
+        if self.n_observed_transitions % self.hp.n_transitions_per_update:
+            return None
+        
+        for _ in range(self.hp.n_gradients_per_update):
 
-        info = dict()
-        (
-            b_observations,
-            b_actions,
-            b_rewards,
-            b_dones,
-            b_next_observations,
-        ) = self.buffer.get_batch(self.hp.batch_size)
+            info = dict()
+            (
+                b_observations,
+                b_actions,
+                b_rewards,
+                b_dones,
+                b_next_observations,
+            ) = self.buffer.get_batch(self.hp.batch_size)
 
-        # Update policy
-        (b_policy_grads, info_policy,) = self.batch_policy_loss_grad(
-            self.policy_params, self.q_value_params, b_observations
-        )
-        self.policy_params, self.policy_optmizer_state = self.optimizer_step(
-            self.policy_params, b_policy_grads, self.policy_optmizer_state
-        )
+            # Update policy
+            (b_policy_grads, info_policy,) = self.batch_policy_loss_grad(
+                self.policy_params, self.q_value_params, b_observations
+            )
+            self.policy_params, self.policy_optmizer_state = self.optimizer_step(
+                self.policy_params, b_policy_grads, self.policy_optmizer_state
+            )
 
-        # Update q value
-        (b_q_value_grads, info_q_value,) = self.batch_q_value_loss_grad(
-            self.q_value_params,
-            self.taget_policy_params,
-            self.target_q_value_params,
-            b_observations,
-            b_actions,
-            b_rewards,
-            b_dones,
-            b_next_observations,
-        )
-        self.q_value_params, self.q_value_optimizer_state = self.optimizer_step(
-            self.q_value_params, b_q_value_grads, self.q_value_optimizer_state
-        )
+            # Update q value
+            (b_q_value_grads, info_q_value,) = self.batch_q_value_loss_grad(
+                self.q_value_params,
+                self.taget_policy_params,
+                self.target_q_value_params,
+                b_observations,
+                b_actions,
+                b_rewards,
+                b_dones,
+                b_next_observations,
+            )
+            self.q_value_params, self.q_value_optimizer_state = self.optimizer_step(
+                self.q_value_params, b_q_value_grads, self.q_value_optimizer_state
+            )
 
-        # Sync target params
-        self.taget_policy_params = self.target_params_update(
-            self.policy_params, self.taget_policy_params, self.hp.tau
-        )
-        self.target_q_value_params = self.target_params_update(
-            self.q_value_params, self.target_q_value_params, self.hp.tau
-        )
+            # Sync target params
+            self.taget_policy_params = self.target_params_update(
+                self.policy_params, self.taget_policy_params, self.hp.tau
+            )
+            self.target_q_value_params = self.target_params_update(
+                self.q_value_params, self.target_q_value_params, self.hp.tau
+            )
+
+            self.n_gradient_steps += 1
 
         info.update(info_q_value)
         info.update(info_policy)

@@ -62,6 +62,8 @@ for step in tqdm(range(hp.total_training_steps), smoothing=0):
         metrics.update(
             dict(
                 global_steps=step,
+                observed_transitions=agent.n_observed_transitions,
+                gradient_steps=agent.n_gradient_steps,
                 losses_value_loss=info_mean["agent/q_value_loss"],
                 losses_policy_loss=info_mean["agent/policy_loss"],
             )
