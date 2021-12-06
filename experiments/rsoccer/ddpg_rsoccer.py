@@ -16,9 +16,16 @@ import rsoccer_gym
 hp = AgentDDPG.get_hyperparameters()
 
 hp.environment_name = 'VSS-v0'
-hp.total_training_steps = 5000000
 hp.gamma = 0.95
-hp.min_replay_size = 250000
+hp.batch_size = 256
+hp.min_replay_size = 100000
+hp.replay_capacity = 5000000
+hp.use_ou_noise = True
+hp.ou_noise_dt = 25e-3
+hp.ou_noise_sigma = 0.2
+hp.learning_rate = 1e-3
+hp.n_transitions_per_update = 10
+hp.total_training_steps = (1000000 * hp.n_transitions_per_update) + hp.min_replay_size
 
 print("Agent Version: -> ", get_agent_version())
 print("Agent DDPG Hyper Parameters:")
@@ -26,7 +33,7 @@ pprint.pp(dataclasses.asdict(hp))
 
 # Create environment
 env = gym.make(hp.environment_name)
-env = gym.wrappers.RecordVideo(env, "./monitor/", step_trigger=lambda x: x % 50000 == 0)
+env = gym.wrappers.RecordVideo(env, "./monitor/", step_trigger=lambda x: x % 100000 == 0)
 
 # Set random seeds
 np.random.seed(hp.seed)
@@ -69,6 +76,8 @@ for step in tqdm(range(hp.total_training_steps), smoothing=0):
         metrics.update(
             dict(
                 global_steps=step,
+                observed_transitions=agent.n_observed_transitions,
+                gradient_steps=agent.n_gradient_steps,
                 losses_value_loss=info_mean["agent/q_value_loss"],
                 losses_policy_loss=info_mean["agent/policy_loss"],
             )
