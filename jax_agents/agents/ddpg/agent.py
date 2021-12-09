@@ -29,21 +29,26 @@ class AgentDDPG:
 
         self.hp = hyperparameters
         env = gym.make(self.hp.environment_name)
+        observation_space, action_space = (
+            (self.hp.observation_space, self.hp.action_space)
+            if self.hp.custom_env_space
+            else (env.observation_space, env.action_space)
+        )
         self.buffer = ReplayBuffer(
-            env.observation_space, env.action_space, self.hp.replay_capacity
+            observation_space, action_space, self.hp.replay_capacity
         )
 
         # Networks
-        self.policy_model = PolicyModule(env.action_space.shape[0])
+        self.policy_model = PolicyModule(action_space.shape[0])
 
         self.q_value_model = (
             DoubleQValueModule() if self.hp.double_q else QValueModule()
         )
         self.policy_params = self.policy_model.init(
-            policy_key, env.observation_space.sample()
+            policy_key, observation_space.sample()
         )
         self.q_value_params = self.q_value_model.init(
-            q_value_key, env.observation_space.sample(), env.action_space.sample()
+            q_value_key, observation_space.sample(), action_space.sample()
         )
         self.taget_policy_params = self.policy_params
         self.target_q_value_params = self.q_value_params
@@ -79,15 +84,15 @@ class AgentDDPG:
         )
         if self.hp.use_ou_noise:
             noise = get_ornstein_uhlenbeck_noise_fn(
-                env.action_space,
+                action_space,
                 self.hp.ou_noise_sigma,
                 self.hp.ou_noise_theta,
                 self.hp.ou_noise_dt,
             )
         else:
-            noise = get_gaussian_noise_fn(env.action_space, self.hp.normal_noise_sigma)
+            noise = get_gaussian_noise_fn(action_space, self.hp.normal_noise_sigma)
         self.noise_state = jax.numpy.zeros(
-            env.action_space.shape
+            action_space.shape
         )  # TODO: reseting noise and initial?
 
         # Jitting
@@ -114,10 +119,10 @@ class AgentDDPG:
     def update(self):
         if self.buffer.size < self.hp.min_replay_size:
             return None
-        
+
         if self.n_observed_transitions % self.hp.n_transitions_per_update:
             return None
-        
+
         for _ in range(self.hp.n_gradients_per_update):
 
             info = dict()

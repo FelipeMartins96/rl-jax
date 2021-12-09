@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-
+import gym
 
 @dataclass
 class HyperparametersDDPG:
@@ -27,3 +27,8 @@ class HyperparametersDDPG:
     # Transitions and Gradient Ratios
     n_gradients_per_update: int = 1
     n_transitions_per_update: int = 1
+
+    # Custom env spaces
+    custom_env_space: bool = False
+    observation_space: gym.Space = None
+    action_space: gym.Space = None
