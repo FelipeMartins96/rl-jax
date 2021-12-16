@@ -133,13 +133,13 @@ for step in tqdm(range(man_hp.total_training_steps), smoothing=0):
     
     man_agent.observe(obs, man_action, logprob, rewards[0], terminal_state, _obs)
 
-    if load_worker:
+    if not load_worker:
         wor_obs2 = np.concatenate([_obs[4:], man_action])
         wor_agent.observe(wor_obs, wor_action, logprob, rewards[1], False, wor_obs2)
     
     man_update_info = man_agent.update()
 
-    if load_worker:
+    if not load_worker:
         wor_update_info = wor_agent.update()
 
     if man_update_info and len(man_ep_rws):
@@ -154,7 +154,7 @@ for step in tqdm(range(man_hp.total_training_steps), smoothing=0):
             )
         )
 
-        if load_worker:
+        if not load_worker:
             wor_info_mean = jax.tree_map(lambda x: x.mean(axis=0), wor_update_info)
             metrics.update(
                 worker_losses_value_loss=wor_info_mean["agent/q_value_loss"],
@@ -212,7 +212,7 @@ for step in tqdm(range(man_hp.total_training_steps), smoothing=0):
 
 
 while not done:
-    _obs, reward, done, step_info = env.step(env.action_space.sample)
+    _obs, reward, done, step_info = env.step(env.action_space.sample())
     obs = _obs
 
 env.close()
