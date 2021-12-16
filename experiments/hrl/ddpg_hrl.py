@@ -60,7 +60,7 @@ wor_hp.observation_space = gym.spaces.Box(
     low=env.observation_space.low[0],
     high=env.observation_space.high[0],
     shape=np.concatenate(
-        [env.observation_space.sample(), man_hp.action_space.sample()]
+        [env.observation_space.sample()[4:], man_hp.action_space.sample()]
     ).shape,
     dtype=env.observation_space.dtype,
 )
@@ -119,7 +119,7 @@ for step in tqdm(range(man_hp.total_training_steps), smoothing=0):
     # Get manager action (Target point)
     man_action, logprob = man_agent.sample_action(obs)
     # Get Worker action (wheel speeds)
-    wor_obs = np.concatenate([obs, man_action])
+    wor_obs = np.concatenate([obs[4:], man_action])
     wor_action, logprob = wor_agent.sample_action(wor_obs)
     
     # Join actions and step environment
@@ -134,7 +134,7 @@ for step in tqdm(range(man_hp.total_training_steps), smoothing=0):
     man_agent.observe(obs, man_action, logprob, rewards[0], terminal_state, _obs)
 
     if load_worker:
-        wor_obs2 = np.concatenate([_obs, man_action])
+        wor_obs2 = np.concatenate([_obs[4:], man_action])
         wor_agent.observe(wor_obs, wor_action, logprob, rewards[1], False, wor_obs2)
     
     man_update_info = man_agent.update()
@@ -197,7 +197,7 @@ for step in tqdm(range(man_hp.total_training_steps), smoothing=0):
             # Get manager action (Target point)
             val_man_action= man_agent.policy_fn(man_agent.policy_params, val_obs)
             # Get Worker action (wheel speeds)
-            val_wor_obs = np.concatenate([val_obs, val_man_action])
+            val_wor_obs = np.concatenate([val_obs[4:], val_man_action])
             val_wor_action= wor_agent.policy_fn(wor_agent.policy_params, val_wor_obs)
             
             # Join actions and step environment
