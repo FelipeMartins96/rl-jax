@@ -3,6 +3,7 @@ import dataclasses
 
 import gym
 import jax
+import flax.training.checkpoints
 import wandb
 import numpy as np
 from tqdm import tqdm
@@ -15,8 +16,8 @@ import rsoccer_gym
 # Get default agent hyperparameters
 hp = AgentDDPG.get_hyperparameters()
 
-hp.environment_name = 'VSSGoTo-v3'
-hp.total_training_steps = 5100000
+hp.environment_name = "VSSGoTo-v0"
+hp.total_training_steps = 2100000
 hp.gamma = 0.95
 hp.batch_size = 256
 hp.min_replay_size = 100000
@@ -109,7 +110,7 @@ for step in tqdm(range(hp.total_training_steps), smoothing=0):
         ep_info = step_info
     else:
         obs = _obs
-    
+
     # Run validation episode
     if step % validation_frequency == 0:
         val_obs = val_env.reset()
@@ -118,12 +119,21 @@ for step in tqdm(range(hp.total_training_steps), smoothing=0):
         val_done = False
         while not val_done:
             val_action = agent.policy_fn(agent.policy_params, val_obs)
-            val_obs, val_reward, val_done, val_step_info = val_env.step(np.array(val_action))
+            val_obs, val_reward, val_done, val_step_info = val_env.step(
+                np.array(val_action)
+            )
             val_rw += val_reward
             val_step += 1
         val_step_info.update(dict(validation_return=val_rw, validation_steps=val_step))
         print(val_step_info)
 
+flax.training.checkpoints.save_checkpoint(
+    "checkpoints/",
+    agent.policy_params,
+    hp.total_training_steps,
+    "goto_worker_policy",
+    overwrite=True,
+)
 
 while not done:
     action, logprob = agent.sample_action(obs)

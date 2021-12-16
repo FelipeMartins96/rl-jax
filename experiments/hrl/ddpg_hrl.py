@@ -3,6 +3,7 @@ import dataclasses
 
 import gym
 import jax
+import flax.training.checkpoints
 import wandb
 import numpy as np
 from tqdm import tqdm
@@ -12,17 +13,19 @@ from jax_agents.agents import AgentDDPG
 
 import rsoccer_gym
 
+load_worker = True
+
 # Get manager agent hyperparameters
 man_hp = AgentDDPG.get_hyperparameters()
 
 man_hp.environment_name = "VSSGoToHRL-v0"
 env = gym.make(man_hp.environment_name)
 
-man_hp.total_training_steps = 5100000
+man_hp.total_training_steps = 3100000
 man_hp.gamma = 0.95
 man_hp.batch_size = 256
 man_hp.min_replay_size = 100000
-man_hp.replay_capacity = 5100000
+man_hp.replay_capacity = man_hp.total_training_steps
 man_hp.learning_rate = 1e-4
 man_hp.custom_env_space = True
 man_hp.action_space = gym.spaces.Box(
@@ -34,17 +37,17 @@ man_hp.observation_space = gym.spaces.Box(
     shape=env.observation_space.shape,
     dtype=env.observation_space.dtype,
 )
-validation_frequency = 200000
+validation_frequency = 150000
 
 # Get manager agent hyperparameters
 wor_hp = AgentDDPG.get_hyperparameters()
 
 wor_hp.environment_name = "VSSGoToHRL-v0"
-wor_hp.total_training_steps = 5100000
+wor_hp.total_training_steps = man_hp.total_training_steps
 wor_hp.gamma = 0.95
 wor_hp.batch_size = 256
 wor_hp.min_replay_size = 100000
-wor_hp.replay_capacity = 5100000
+wor_hp.replay_capacity = man_hp.replay_capacity
 wor_hp.use_ou_noise = True
 wor_hp.ou_noise_dt = 25e-3
 wor_hp.ou_noise_sigma = 0.2
@@ -82,10 +85,16 @@ val_env.observation_space.seed(man_hp.seed)
 # Create agents
 man_agent = AgentDDPG(man_hp)
 wor_agent = AgentDDPG(wor_hp)
+if load_worker:
+    wor_agent.policy_params = flax.training.checkpoints.restore_checkpoint(
+        'checkpoints/', 
+        wor_agent.policy_params, 
+        prefix='goto_worker_policy'
+    )
 
 # Init wandb logging
 wandb.init(
-    project="rl-jax-vssgoto",
+    project="rl-jax-hierarchical-vss",
     entity="felipemartins",
     monitor_gym=True,
     save_code=True,
@@ -124,26 +133,34 @@ for step in tqdm(range(man_hp.total_training_steps), smoothing=0):
     
     man_agent.observe(obs, man_action, logprob, rewards[0], terminal_state, _obs)
 
-    wor_obs2 = np.concatenate([_obs, man_action])
-    wor_agent.observe(wor_obs, wor_action, logprob, rewards[1], False, wor_obs2)
+    if load_worker:
+        wor_obs2 = np.concatenate([_obs, man_action])
+        wor_agent.observe(wor_obs, wor_action, logprob, rewards[1], False, wor_obs2)
     
     man_update_info = man_agent.update()
-    wor_update_info = wor_agent.update()
+
+    if load_worker:
+        wor_update_info = wor_agent.update()
 
     if man_update_info and len(man_ep_rws):
         metrics = {}
 
         man_info_mean = jax.tree_map(lambda x: x.mean(axis=0), man_update_info)
-        wor_info_mean = jax.tree_map(lambda x: x.mean(axis=0), wor_update_info)
         metrics.update(
             dict(
                 global_steps=step,
-                losses_value_loss=man_info_mean["manager/q_value_loss"],
-                losses_value_loss=wor_info_mean["worker/q_value_loss"],
-                losses_policy_loss=man_info_mean["manager/policy_loss"],
-                losses_policy_loss=wor_info_mean["worker/policy_loss"],
+                manager_losses_value_loss=man_info_mean["agent/q_value_loss"],
+                manager_losses_policy_loss=man_info_mean["agent/policy_loss"],
             )
         )
+
+        if load_worker:
+            wor_info_mean = jax.tree_map(lambda x: x.mean(axis=0), wor_update_info)
+            metrics.update(
+                worker_losses_value_loss=wor_info_mean["agent/q_value_loss"],
+                worker_losses_policy_loss=wor_info_mean["agent/policy_loss"],
+            )
+        
         if len(man_ep_rws):
             metrics.update(dict(manager_episodic_return=np.mean(man_ep_rws)))
             metrics.update(dict(worker_episodic_return=np.mean(wor_ep_rws)))
@@ -172,23 +189,30 @@ for step in tqdm(range(man_hp.total_training_steps), smoothing=0):
     # Run validation episode
     if step % validation_frequency == 0:
         val_obs = val_env.reset()
-        val_rw = 0
+        val_man_ep_rw = 0
+        val_wor_ep_rw = 0
         val_step = 0
         val_done = False
         while not val_done:
-            val_action = man_agent.policy_fn(man_agent.policy_params, val_obs)
-            val_obs, val_reward, val_done, val_step_info = val_env.step(
-                np.array(val_action)
-            )
-            val_rw += val_reward
+            # Get manager action (Target point)
+            val_man_action= man_agent.policy_fn(man_agent.policy_params, val_obs)
+            # Get Worker action (wheel speeds)
+            val_wor_obs = np.concatenate([val_obs, val_man_action])
+            val_wor_action= wor_agent.policy_fn(wor_agent.policy_params, val_wor_obs)
+            
+            # Join actions and step environment
+            val_action = np.stack([val_man_action, val_wor_action])
+            val_obs, val_rewards, val_done, val_step_info = val_env.step(val_action)
+            val_man_ep_rw += val_rewards[0]
+            val_wor_ep_rw += val_rewards[1]
             val_step += 1
-        val_step_info.update(dict(validation_return=val_rw, validation_steps=val_step))
+
+        val_step_info.update(dict(validation_manager_return=val_man_ep_rw, validation_worker_return=val_wor_ep_rw, validation_steps=val_step))
         print(val_step_info)
 
 
 while not done:
-    action, logprob = man_agent.sample_action(obs)
-    _obs, reward, done, step_info = env.step(action)
+    _obs, reward, done, step_info = env.step(env.action_space.sample)
     obs = _obs
 
 env.close()
