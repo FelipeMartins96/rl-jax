@@ -13,16 +13,87 @@ from jax_agents.agents import AgentDDPG
 
 import rsoccer_gym
 
+import argparse
+
+parser = argparse.ArgumentParser()
+
+# get experiment if from arguments
+parser.add_argument('-e', "--experiment", type=int, required=True)
+args = parser.parse_args()
+
 load_worker = True
+exp_name = None
+ablation = {}
+gamma = 0.95
+
+if args.experiment == 0:
+    exp_name = "no energy"
+    ablation = {
+        'man_w_energy': 0
+    }
+elif args.experiment == 1:
+    exp_name = "no move"
+    ablation = {
+        'man_w_move': 0
+    }
+elif args.experiment == 2:
+    exp_name = "no ball_grad"
+    ablation = {
+        'man_w_ball_grad': 0
+    }
+elif args.experiment == 3:
+    exp_name = "no goal rw"
+    ablation = {
+        'man_w_goal': 0
+    }
+elif args.experiment == 4:
+    exp_name = "baseline (no pretrain no ball obs)"
+    load_worker = False
+elif args.experiment == 5:
+    exp_name = "only goal"
+    ablation = {
+        'man_w_ball_grad': 0,
+        'man_w_move': 0,
+        'man_w_energy': 0,
+    }
+elif args.experiment == 6:
+    exp_name = "only ball grad"
+    ablation = {
+        'man_w_goal': 0,
+        'man_w_move': 0,
+        'man_w_energy': 0,
+    }
+elif args.experiment == 7:
+    exp_name = "only ball grad and goal"
+    ablation = {
+        'man_w_move': 0,
+        'man_w_energy': 0,
+    }
+elif args.experiment == 8:
+    exp_name = "only move"
+    ablation = {
+        'man_w_goal': 0,
+        'man_w_ball_grad': 0,
+        'man_w_energy': 0,
+    }
+elif args.experiment == 9:
+    exp_name = "only goal, gamma .99"
+    ablation = {
+        'man_w_ball_grad': 0,
+        'man_w_move': 0,
+        'man_w_energy': 0,
+    }
+    gamma = 0.99
+
 
 # Get manager agent hyperparameters
 man_hp = AgentDDPG.get_hyperparameters()
 
 man_hp.environment_name = "VSSGoToHRL-v0"
-env = gym.make(man_hp.environment_name)
+env = gym.make(man_hp.environment_name, **ablation)
 
 man_hp.total_training_steps = 3100000
-man_hp.gamma = 0.95
+man_hp.gamma = gamma
 man_hp.batch_size = 256
 man_hp.min_replay_size = 100000
 man_hp.replay_capacity = man_hp.total_training_steps
@@ -44,7 +115,7 @@ wor_hp = AgentDDPG.get_hyperparameters()
 
 wor_hp.environment_name = "VSSGoToHRL-v0"
 wor_hp.total_training_steps = man_hp.total_training_steps
-wor_hp.gamma = 0.95
+wor_hp.gamma = gamma
 wor_hp.batch_size = 256
 wor_hp.min_replay_size = 100000
 wor_hp.replay_capacity = man_hp.replay_capacity
@@ -98,6 +169,7 @@ wandb.init(
     entity="felipemartins",
     monitor_gym=True,
     save_code=True,
+    name=exp_name,
     config=dict(
         algorithm=man_hp.algorithm_name,
         agent_version=get_agent_version(),
