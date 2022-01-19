@@ -27,18 +27,19 @@ ablation = {}
 gamma = 0.95
 
 if args.experiment == 0:
-    exp_name = "no energy"
+    exp_name = "non hrl, no energy, no move, old net layers, v1"
     ablation = {
-        'man_w_energy': 0
+        'man_w_energy': 0,
+        'man_w_move': 0
     }
 
 # Get manager agent hyperparameters
 man_hp = AgentDDPG.get_hyperparameters()
 
-man_hp.environment_name = "VSSGoToHRL-v0"
+man_hp.environment_name = "VSSGoToHRL-v1"
 env = gym.make(man_hp.environment_name, **ablation)
 
-man_hp.total_training_steps = 3100000
+man_hp.total_training_steps = 6100000
 man_hp.gamma = gamma
 man_hp.batch_size = 256
 man_hp.min_replay_size = 100000
