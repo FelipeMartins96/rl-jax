@@ -18,13 +18,25 @@ class PolicyModule(nn.Module):
     @nn.compact
     def __call__(self, o):
         x = nn.Dense(
-            400,
+            256,
             kernel_init=lecun_uniform(),
             bias_init=bias_init_fn(fan_in=o.shape[-1]),
         )(o)
         x = nn.relu(x)
         x = nn.Dense(
-            300, kernel_init=lecun_uniform(), bias_init=bias_init_fn(fan_in=400)
+            256, kernel_init=lecun_uniform(), bias_init=bias_init_fn(fan_in=256)
+        )(x)
+        x = nn.relu(x)
+        x = nn.Dense(
+            512, kernel_init=lecun_uniform(), bias_init=bias_init_fn(fan_in=256)
+        )(x)
+        x = nn.relu(x)
+        x = nn.Dense(
+            512, kernel_init=lecun_uniform(), bias_init=bias_init_fn(fan_in=512)
+        )(x)
+        x = nn.relu(x)
+        x = nn.Dense(
+            256, kernel_init=lecun_uniform(), bias_init=bias_init_fn(fan_in=512)
         )(x)
         x = nn.relu(x)
         x = nn.Dense(
@@ -43,16 +55,28 @@ class QValueModule(nn.Module):
     @nn.compact
     def __call__(self, o, a):
         x = nn.Dense(
-            400,
+            512,
             kernel_init=lecun_uniform(),
             bias_init=bias_init_fn(fan_in=o.shape[-1]),
         )(o)
         x = nn.relu(x)
         x = nn.Dense(
-            300,
+            512, kernel_init=lecun_uniform(), bias_init=bias_init_fn(fan_in=512)
+        )(x)
+        x = nn.relu(x)
+        x = nn.Dense(
+            1024, kernel_init=lecun_uniform(), bias_init=bias_init_fn(fan_in=512)
+        )(x)
+        x = nn.relu(x)
+        x = nn.Dense(
+            512,
             kernel_init=lecun_uniform(),
-            bias_init=bias_init_fn(fan_in=400 + a.shape[-1]),
+            bias_init=bias_init_fn(fan_in=1024 + a.shape[-1]),
         )(jnp.concatenate([x, a], axis=-1))
+        x = nn.relu(x)
+        x = nn.Dense(
+            512, kernel_init=lecun_uniform(), bias_init=bias_init_fn(fan_in=512)
+        )(x)
         x = nn.relu(x)
         x = nn.Dense(1, kernel_init=uniform(scale=3e-4), bias_init=uniform(scale=3e-4))(
             x

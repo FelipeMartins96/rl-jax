@@ -27,11 +27,16 @@ ablation = {}
 gamma = 0.95
 
 if args.experiment == 0:
-    exp_name = "non hrl, no energy, no move, old net layers, v1"
-    ablation = {
-        'man_w_energy': 0,
-        'man_w_move': 0
-    }
+    env_name = 'VSSGoToHRL-v0'
+    n_steps = 3100000
+    exp_name = "non hrl, no energy, no move, new net layers, v0"
+    ablation = {'man_w_energy': 0, 'man_w_move': 0}
+elif args.experiment == 1:
+    env_name = 'VSSGoToHRL-v1'
+    n_steps = 6100000
+    exp_name = "non hrl, no energy, no move, new net layers, v1"
+    ablation = {'man_w_energy': 0, 'man_w_move': 0}
+
 
 # Get manager agent hyperparameters
 man_hp = AgentDDPG.get_hyperparameters()
@@ -39,7 +44,7 @@ man_hp = AgentDDPG.get_hyperparameters()
 man_hp.environment_name = "VSSGoToHRL-v1"
 env = gym.make(man_hp.environment_name, **ablation)
 
-man_hp.total_training_steps = 6100000
+man_hp.total_training_steps = n_steps
 man_hp.gamma = gamma
 man_hp.batch_size = 256
 man_hp.min_replay_size = 100000
@@ -103,7 +108,7 @@ fake_targets = env.action_space.high[0]
 for step in tqdm(range(man_hp.total_training_steps), smoothing=0):
     # Get manager action (Target point)
     man_action, logprob = man_agent.sample_action(obs)
-    
+
     # Join actions and step environment
     a = np.stack([fake_targets, man_action])
     _obs, rewards, done, step_info = env.step(a)
@@ -111,9 +116,9 @@ for step in tqdm(range(man_hp.total_training_steps), smoothing=0):
     ep_step += 1
 
     terminal_state = False if not done or "TimeLimit.truncated" in step_info else True
-    
+
     man_agent.observe(obs, man_action, logprob, rewards[0], terminal_state, _obs)
-    
+
     man_update_info = man_agent.update()
 
     if man_update_info and len(man_ep_rws):
@@ -127,7 +132,7 @@ for step in tqdm(range(man_hp.total_training_steps), smoothing=0):
                 manager_losses_policy_loss=man_info_mean["agent/policy_loss"],
             )
         )
-        
+
         if len(man_ep_rws):
             metrics.update(dict(manager_episodic_return=np.mean(man_ep_rws)))
             metrics.update(dict(mean_ep_steps=np.mean(ep_steps)))
@@ -159,14 +164,16 @@ for step in tqdm(range(man_hp.total_training_steps), smoothing=0):
         val_done = False
         while not val_done:
             # Get manager action (Target point)
-            val_man_action= man_agent.policy_fn(man_agent.policy_params, val_obs)
+            val_man_action = man_agent.policy_fn(man_agent.policy_params, val_obs)
 
             a = np.stack([fake_targets, val_man_action])
             val_obs, val_rewards, val_done, val_step_info = val_env.step(a)
             val_man_ep_rw += val_rewards[0]
             val_step += 1
 
-        val_step_info.update(dict(validation_manager_return=val_man_ep_rw, validation_steps=val_step))
+        val_step_info.update(
+            dict(validation_manager_return=val_man_ep_rw, validation_steps=val_step)
+        )
         print(val_step_info)
 
 
