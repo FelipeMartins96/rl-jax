@@ -41,7 +41,7 @@ elif args.experiment == 1:
 # Get manager agent hyperparameters
 man_hp = AgentDDPG.get_hyperparameters()
 
-man_hp.environment_name = "VSSGoToHRL-v1"
+man_hp.environment_name = env_name
 env = gym.make(man_hp.environment_name, **ablation)
 
 man_hp.total_training_steps = n_steps
