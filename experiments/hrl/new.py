@@ -64,6 +64,7 @@ if load_worker:
 
 m_obs = env.reset()
 rewards = 0
+ep_steps = 0
 done = False
 for step in tqdm(range(hp.total_training_steps), smoothing=0.01):
     m_action, _ = m_agent.sample_action(m_obs)
@@ -77,9 +78,10 @@ for step in tqdm(range(hp.total_training_steps), smoothing=0.01):
     m_agent.update()
 
     rewards += reward.manager
+    ep_steps += 1
     if done:
         m_obs = env.reset()
         log = info_to_log(info)
-        log.update({'ep_reward': rewards})
-        wandb.log(log)
-        rewards = 0
+        log.update({'ep_reward': rewards, 'ep_steps': ep_steps})
+        wandb.log(log, step=step)
+        rewards, ep_steps = 0, 0
