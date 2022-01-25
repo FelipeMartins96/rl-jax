@@ -37,6 +37,7 @@ hp = HyperparametersDDPG(
 )
 
 env = gym.make(hp.environment_name)
+env = gym.wrappers.RecordVideo(env, '/videos/', step_trigger=lambda x: x % 50000 == 0)
 env.set_key(jax.random.PRNGKey(hp.seed))
 
 wandb.init(project='hrl-refactor', entity='felipemartins', name=exp_name, monitor_gym=True)
