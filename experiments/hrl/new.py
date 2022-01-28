@@ -37,10 +37,12 @@ hp = HyperparametersDDPG(
 )
 
 env = gym.make(hp.environment_name)
-env = gym.wrappers.RecordVideo(env, './videos/', step_trigger=lambda x: x % 50000 == 0)
+env = gym.wrappers.RecordVideo(env, './monitor/', step_trigger=lambda x: x % 50000 == 0)
 env.set_key(jax.random.PRNGKey(hp.seed))
 
-wandb.init(project='hrl-refactor', entity='felipemartins', name=exp_name, monitor_gym=True)
+wandb.init(
+    project='hrl-refactor', entity='felipemartins', name=exp_name, monitor_gym=True
+)
 
 # Manager Hyperparameters
 m_hp = deepcopy(hp)
@@ -69,7 +71,9 @@ done = False
 for step in tqdm(range(hp.total_training_steps), smoothing=0.01):
     m_action, _ = m_agent.sample_action(m_obs)
     w_obs = env.set_action_m(m_action)
-    w_action = w_agent.policy_fn(w_agent.policy_params, w_obs)  # TODO: Implement policies
+    w_action = w_agent.policy_fn(
+        w_agent.policy_params, w_obs
+    )  # TODO: Implement policies
     _obs, reward, done, info = env.step(w_action)
 
     terminal_state = False if not done or "TimeLimit.truncated" in info else True
@@ -79,6 +83,7 @@ for step in tqdm(range(hp.total_training_steps), smoothing=0.01):
 
     rewards += reward.manager
     ep_steps += 1
+    m_obs = _obs.manager
     if done:
         m_obs = env.reset()
         log = info_to_log(info)
