@@ -19,4 +19,5 @@ def run_validation_ep(m_agent, w_agent, env, opponent_policies):
         w_obs = env.set_action_m(m_action)
         w_action = w_agent.policy_fn(w_agent.policy_params, w_obs)
         step_action = np.stack([w_action] + [[p()] for p in opponent_policies], axis=0)
-        _, _, done, _ = env.step(step_action)
+        _obs, _, done, _ = env.step(step_action)
+        m_obs = _obs.manager
