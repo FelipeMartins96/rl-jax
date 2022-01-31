@@ -1,5 +1,5 @@
 --wandb-mode
-enabled
+online
 --wandb-name
 1v0
 --env-n-robots-blue
