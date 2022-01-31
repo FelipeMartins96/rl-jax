@@ -1,4 +1,4 @@
 #!/bin/bash
-for i in 0 1; do
-  python ddpg_baseline.py -e $i
+for i in 0 1 2; do
+  python train.py @experiments/base.txt @experiments/$i.txt
 done

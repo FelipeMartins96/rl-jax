@@ -1,0 +1,10 @@
+--wandb-mode
+enabled
+--wandb-name
+1v0
+--env-n-robots-blue
+1
+--env-n-robots-yellow
+0
+--env-opponent-policy
+off
