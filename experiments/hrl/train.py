@@ -88,7 +88,7 @@ def main(args):
         m_action, _ = m_agent.sample_action(m_obs)
         w_obs = env.set_action_m(m_action)
         w_action = w_agent.policy_fn(w_agent.policy_params, w_obs)
-        step_action = np.stack([w_action] + [[p()] for p in opponent_policies], axis=0)
+        step_action = np.concatenate([w_action] + [[p()] for p in opponent_policies], axis=0)
         _obs, reward, done, info = env.step(step_action)
 
         terminal_state = False if not done or "TimeLimit.truncated" in info else True
