@@ -1,9 +1,9 @@
 --wandb-mode
 online
 --wandb-name
-1v3
+2v3
 --env-n-robots-blue
-1
+2
 --env-n-robots-yellow
 3
 --env-opponent-policy
